@@ -13,7 +13,7 @@ func TestNewSuccess(t *testing.T) {
 	playersPath := filepath.Join(dir, "players.json")
 	rankPath := filepath.Join(dir, "rank.json")
 
-	if err := os.WriteFile(rankPath, []byte(`{"ranks":{"GOLD":{"1":2500}}}`), 0o644); err != nil {
+	if err := os.WriteFile(rankPath, []byte(`{"ranks":{"gold":{"1":2500}}}`), 0o644); err != nil {
 		t.Fatalf("failed to write rank data: %v", err)
 	}
 
