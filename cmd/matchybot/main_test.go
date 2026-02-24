@@ -19,8 +19,8 @@ func TestLoadConfigSuccess(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempFile(t, dir, "config.json", `{
 		"bot_token":"token",
-		"player_data_path":"data/players.json",
-		"rank_data_path":"data/rank.json"
+		"player_data_path":"player_data.json",
+		"rank_data_path":"rank.json"
 	}`)
 
 	cfg, err := loadConfig(path)
@@ -28,7 +28,7 @@ func TestLoadConfigSuccess(t *testing.T) {
 		t.Fatalf("loadConfig returned error: %v", err)
 	}
 
-	if cfg.BotToken != "token" || cfg.PlayerDataPath != "data/players.json" || cfg.RankDataPath != "data/rank.json" {
+	if cfg.BotToken != "token" || cfg.PlayerDataPath != "player_data.json" || cfg.RankDataPath != "rank.json" {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
 }
@@ -63,5 +63,15 @@ func TestLoadConfigFileErrors(t *testing.T) {
 	path := writeTempFile(t, dir, "config.json", `{invalid`)
 	if _, err := loadConfig(path); err == nil {
 		t.Fatalf("expected error for invalid json")
+	}
+}
+
+func TestResolvePath(t *testing.T) {
+	base := "/opt/matchybot"
+	if got := resolvePath(base, "player_data.json"); got != "/opt/matchybot/player_data.json" {
+		t.Fatalf("unexpected relative resolution: %s", got)
+	}
+	if got := resolvePath(base, "/var/lib/rank.json"); got != "/var/lib/rank.json" {
+		t.Fatalf("absolute path should stay unchanged: %s", got)
 	}
 }
