@@ -10,9 +10,11 @@ wheels/
 .venv
 .env
 
-# go build artifacts (repo root)
+# go build artifacts
 /matchybot
 /matchybot.exe
+/bin/*
+!/bin/.gitkeep
 
 # local config
 /config.json

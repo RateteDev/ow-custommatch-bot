@@ -18,16 +18,20 @@ go version
 go mod tidy
 ```
 
+## ビルド出力先
+
+当面、ビルド済みファイルはリポジトリ内の `bin/` に配置します（最終的には Release 配布を想定）。
+
 ## ビルド
 
 ```bash
-go build -o matchybot ./cmd/matchybot
+go build -o bin/matchybot ./cmd/matchybot
 ```
 
 Windows 向け exe:
 
 ```bash
-GOOS=windows GOARCH=amd64 go build -o matchybot.exe ./cmd/matchybot
+GOOS=windows GOARCH=amd64 go build -o bin/matchybot.exe ./cmd/matchybot
 ```
 
 ## テスト
