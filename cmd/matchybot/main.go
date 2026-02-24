@@ -1,62 +1,100 @@
 package main
 
 import (
-	"encoding/json"
+	"bufio"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"matchybot/internal/bot"
 )
 
-type Config struct {
-	BotToken       string `json:"bot_token"`
-	PlayerDataPath string `json:"player_data_path"`
-	RankDataPath   string `json:"rank_data_path"`
+const (
+	envFileName        = ".env"
+	playerDataFileName = "player_data.json"
+	rankDataFileName   = "rank.json"
+)
+
+func executableDir() (string, error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("resolve executable path: %w", err)
+	}
+	return filepath.Dir(exePath), nil
 }
 
-func loadConfig(path string) (Config, error) {
+func loadEnvFile(path string) error {
 	file, err := os.Open(path)
 	if err != nil {
-		return Config{}, fmt.Errorf("open config: %w", err)
+		return fmt.Errorf("open env file: %w", err)
 	}
 	defer file.Close()
 
-	var cfg Config
-	if err := json.NewDecoder(file).Decode(&cfg); err != nil {
-		return Config{}, fmt.Errorf("decode config: %w", err)
+	scanner := bufio.NewScanner(file)
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			return fmt.Errorf("invalid env format at line %d", lineNo)
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" {
+			return fmt.Errorf("empty env key at line %d", lineNo)
+		}
+
+		if err := os.Setenv(key, value); err != nil {
+			return fmt.Errorf("set env %s: %w", key, err)
+		}
 	}
 
-	if cfg.BotToken == "" {
-		return Config{}, fmt.Errorf("bot_token is required")
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("scan env file: %w", err)
 	}
-	if cfg.PlayerDataPath == "" {
-		return Config{}, fmt.Errorf("player_data_path is required")
-	}
-	if cfg.RankDataPath == "" {
-		return Config{}, fmt.Errorf("rank_data_path is required")
-	}
+	return nil
+}
 
-	return cfg, nil
+func requiredEnv(key string) (string, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return "", fmt.Errorf("%s is required", key)
+	}
+	return value, nil
 }
 
 func main() {
-	configPath := "config.json"
-	if len(os.Args) > 1 {
-		configPath = os.Args[1]
-	}
-
-	cfg, err := loadConfig(configPath)
+	exeDir, err := executableDir()
 	if err != nil {
-		log.Fatalf("failed to load config (%s): %v", configPath, err)
+		log.Fatalf("failed to determine executable directory: %v", err)
 	}
 
-	b, err := bot.New(cfg.PlayerDataPath, cfg.RankDataPath)
+	envPath := filepath.Join(exeDir, envFileName)
+	if err := loadEnvFile(envPath); err != nil {
+		log.Fatalf("failed to load env (%s): %v", envPath, err)
+	}
+
+	botToken, err := requiredEnv("BOT_TOKEN")
+	if err != nil {
+		log.Fatalf("failed to read env: %v", err)
+	}
+
+	playerDataPath := filepath.Join(exeDir, playerDataFileName)
+	rankDataPath := filepath.Join(exeDir, rankDataFileName)
+
+	b, err := bot.New(playerDataPath, rankDataPath)
 	if err != nil {
 		log.Fatalf("failed to initialize bot: %v", err)
 	}
 
-	if err := b.Run(cfg.BotToken); err != nil {
+	if err := b.Run(botToken); err != nil {
 		log.Fatalf("bot error: %v", err)
 	}
 }

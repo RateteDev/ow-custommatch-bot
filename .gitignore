@@ -10,12 +10,20 @@ wheels/
 .venv
 .env
 
-# go build artifacts (repo root)
+# go build artifacts
 /matchybot
 /matchybot.exe
+/bin/*
+!/bin/.gitkeep
 
-# local config
-/config.json
+# local env
+/.env
+/bin/.env
 
 # personal data
 */players.json
+
+# bot data files
+/player_data.json
+/bin/player_data.json
+/bin/rank.json
