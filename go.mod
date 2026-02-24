@@ -1,4 +1,4 @@
-module matchybot
+module github.com/RateteDev/MatchyBot
 
 go 1.26.0
 

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"matchybot/internal/bot"
+	"github.com/RateteDev/MatchyBot/internal/bot"
 )
 
 const (

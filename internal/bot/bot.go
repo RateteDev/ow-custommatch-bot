@@ -9,7 +9,7 @@ import (
 	"syscall"
 
 	"github.com/bwmarrin/discordgo"
-	"matchybot/internal/model"
+	"github.com/RateteDev/MatchyBot/internal/model"
 )
 
 type Bot struct {
