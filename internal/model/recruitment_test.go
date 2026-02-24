@@ -66,3 +66,35 @@ func TestMakeTeams(t *testing.T) {
 		t.Fatalf("expected all players to be assigned once, got %d", len(seen))
 	}
 }
+
+func TestRemoveEntry_existing(t *testing.T) {
+	r := NewRecruitment(RankDataFile{})
+	r.AddEntry("u1", "UserOne")
+	r.AddEntry("u2", "UserTwo")
+
+	got := r.RemoveEntry("u1")
+
+	if !got {
+		t.Errorf("RemoveEntry(existing) = false, want true")
+	}
+	if len(r.Entries) != 1 {
+		t.Errorf("len(Entries) = %d, want 1", len(r.Entries))
+	}
+	if r.Entries[0].UserID != "u2" {
+		t.Errorf("remaining entry = %s, want u2", r.Entries[0].UserID)
+	}
+}
+
+func TestRemoveEntry_notExisting(t *testing.T) {
+	r := NewRecruitment(RankDataFile{})
+	r.AddEntry("u1", "UserOne")
+
+	got := r.RemoveEntry("unknown")
+
+	if got {
+		t.Errorf("RemoveEntry(not existing) = true, want false")
+	}
+	if len(r.Entries) != 1 {
+		t.Errorf("len(Entries) = %d, want 1", len(r.Entries))
+	}
+}

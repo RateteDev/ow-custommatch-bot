@@ -18,8 +18,12 @@ type ScoredPlayer struct {
 }
 
 type Recruitment struct {
-	Entries  []Entry
-	RankData RankDataFile
+	Entries     []Entry
+	RankData    RankDataFile
+	OrganizerID string // 発案者の Discord UserID
+	MessageID   string // Discord メッセージID（Embed 更新用）
+	ChannelID   string // チャンネルID
+	IsOpen      bool   // 募集中かどうか
 }
 
 func NewRecruitment(rankData RankDataFile) *Recruitment {
@@ -34,6 +38,17 @@ func (r *Recruitment) AddEntry(userID, name string) bool {
 	}
 	r.Entries = append(r.Entries, Entry{UserID: userID, Name: name})
 	return true
+}
+
+// RemoveEntry はエントリーを取り消す。成功したら true、存在しない場合は false を返す。
+func (r *Recruitment) RemoveEntry(userID string) bool {
+	for i, e := range r.Entries {
+		if e.UserID == userID {
+			r.Entries = append(r.Entries[:i], r.Entries[i+1:]...)
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Recruitment) CalculatePlayerScore(highestRank Rank) float64 {
