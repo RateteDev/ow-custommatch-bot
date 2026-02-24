@@ -1,5 +1,0 @@
-{
-  "bot_token": "YOUR_DISCORD_BOT_TOKEN",
-  "player_data_path": "player_data.json",
-  "rank_data_path": "rank.json"
-}

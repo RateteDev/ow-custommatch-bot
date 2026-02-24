@@ -34,6 +34,17 @@ Windows 向け exe:
 GOOS=windows GOARCH=amd64 go build -o bin/matchybot.exe ./cmd/matchybot
 ```
 
+## 実行時に必要なファイル（bin 配下）
+
+- `.env`（`BOT_TOKEN` を設定）
+- `rank.json`（`data/rank.json` をコピー）
+- `player_data.json`（起動時に自動生成されるため事前作成不要）
+
+```bash
+cp .env.example bin/.env
+cp data/rank.json bin/rank.json
+```
+
 ## テスト
 
 ```bash

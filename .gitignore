@@ -16,8 +16,14 @@ wheels/
 /bin/*
 !/bin/.gitkeep
 
-# local config
-/config.json
+# local env
+/.env
+/bin/.env
 
 # personal data
 */players.json
+
+# bot data files
+/player_data.json
+/bin/player_data.json
+/bin/rank.json

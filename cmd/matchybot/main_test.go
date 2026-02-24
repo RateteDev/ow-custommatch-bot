@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -15,63 +16,58 @@ func writeTempFile(t *testing.T, dir, name, body string) string {
 	return path
 }
 
-func TestLoadConfigSuccess(t *testing.T) {
+func TestLoadEnvFileSuccess(t *testing.T) {
+	t.Setenv("BOT_TOKEN", "")
 	dir := t.TempDir()
-	path := writeTempFile(t, dir, "config.json", `{
-		"bot_token":"token",
-		"player_data_path":"player_data.json",
-		"rank_data_path":"rank.json"
-	}`)
+	path := writeTempFile(t, dir, ".env", "# comment\nBOT_TOKEN=test-token\n")
 
-	cfg, err := loadConfig(path)
+	if err := loadEnvFile(path); err != nil {
+		t.Fatalf("loadEnvFile returned error: %v", err)
+	}
+
+	if got := os.Getenv("BOT_TOKEN"); got != "test-token" {
+		t.Fatalf("unexpected BOT_TOKEN: %s", got)
+	}
+}
+
+func TestLoadEnvFileErrors(t *testing.T) {
+	t.Run("missing file", func(t *testing.T) {
+		if err := loadEnvFile("does-not-exist.env"); err == nil {
+			t.Fatalf("expected error for missing file")
+		}
+	})
+
+	t.Run("invalid format", func(t *testing.T) {
+		dir := t.TempDir()
+		path := writeTempFile(t, dir, ".env", "INVALID_LINE")
+		if err := loadEnvFile(path); err == nil {
+			t.Fatalf("expected error for invalid format")
+		}
+	})
+}
+
+func TestRequiredEnv(t *testing.T) {
+	t.Setenv("BOT_TOKEN", "abc")
+	v, err := requiredEnv("BOT_TOKEN")
 	if err != nil {
-		t.Fatalf("loadConfig returned error: %v", err)
+		t.Fatalf("requiredEnv returned error: %v", err)
+	}
+	if v != "abc" {
+		t.Fatalf("unexpected value: %s", v)
 	}
 
-	if cfg.BotToken != "token" || cfg.PlayerDataPath != "player_data.json" || cfg.RankDataPath != "rank.json" {
-		t.Fatalf("unexpected config: %#v", cfg)
+	t.Setenv("BOT_TOKEN", "")
+	if _, err := requiredEnv("BOT_TOKEN"); err == nil {
+		t.Fatalf("expected error when env is empty")
 	}
 }
 
-func TestLoadConfigValidationErrors(t *testing.T) {
-	tests := []struct {
-		name string
-		body string
-	}{
-		{name: "missing bot token", body: `{"player_data_path":"a","rank_data_path":"b"}`},
-		{name: "missing player data", body: `{"bot_token":"t","rank_data_path":"b"}`},
-		{name: "missing rank data", body: `{"bot_token":"t","player_data_path":"a"}`},
+func TestExecutableDir(t *testing.T) {
+	dir, err := executableDir()
+	if err != nil {
+		t.Fatalf("executableDir returned error: %v", err)
 	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			path := writeTempFile(t, dir, "config.json", tc.body)
-			if _, err := loadConfig(path); err == nil {
-				t.Fatalf("expected validation error")
-			}
-		})
-	}
-}
-
-func TestLoadConfigFileErrors(t *testing.T) {
-	if _, err := loadConfig("does-not-exist.json"); err == nil {
-		t.Fatalf("expected error for missing file")
-	}
-
-	dir := t.TempDir()
-	path := writeTempFile(t, dir, "config.json", `{invalid`)
-	if _, err := loadConfig(path); err == nil {
-		t.Fatalf("expected error for invalid json")
-	}
-}
-
-func TestResolvePath(t *testing.T) {
-	base := "/opt/matchybot"
-	if got := resolvePath(base, "player_data.json"); got != "/opt/matchybot/player_data.json" {
-		t.Fatalf("unexpected relative resolution: %s", got)
-	}
-	if got := resolvePath(base, "/var/lib/rank.json"); got != "/var/lib/rank.json" {
-		t.Fatalf("absolute path should stay unchanged: %s", got)
+	if strings.TrimSpace(dir) == "" {
+		t.Fatalf("executableDir returned empty dir")
 	}
 }
