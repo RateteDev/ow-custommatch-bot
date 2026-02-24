@@ -4,8 +4,8 @@ import "testing"
 
 func testRankData() RankDataFile {
 	return RankDataFile{Ranks: RankTable{
-		"GOLD":   {"1": 2500},
-		"SILVER": {"1": 2000},
+		"gold":   {"1": 2500},
+		"silver": {"1": 2000},
 	}}
 }
 
@@ -22,13 +22,13 @@ func TestAddEntry(t *testing.T) {
 func TestCalculatePlayerScore(t *testing.T) {
 	r := NewRecruitment(testRankData())
 
-	if got := r.CalculatePlayerScore(Rank{Rank: "TOP500"}); got != 4500 {
+	if got := r.CalculatePlayerScore(Rank{Rank: "top500"}); got != 4500 {
 		t.Fatalf("TOP500 score mismatch: %v", got)
 	}
-	if got := r.CalculatePlayerScore(Rank{Rank: "GOLD", Division: "1"}); got != 2500 {
+	if got := r.CalculatePlayerScore(Rank{Rank: "gold", Division: "1"}); got != 2500 {
 		t.Fatalf("rank score mismatch: %v", got)
 	}
-	if got := r.CalculatePlayerScore(Rank{Rank: "UNKNOWN", Division: "1"}); got != 0 {
+	if got := r.CalculatePlayerScore(Rank{Rank: "unknown", Division: "1"}); got != 0 {
 		t.Fatalf("unknown rank should be 0, got %v", got)
 	}
 }

@@ -4,7 +4,7 @@
 
 ## 必要なもの
 
-- Go 1.23 以上
+- Go 1.22 以上
 
 ```bash
 go version

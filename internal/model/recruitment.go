@@ -37,7 +37,7 @@ func (r *Recruitment) AddEntry(userID, name string) bool {
 }
 
 func (r *Recruitment) CalculatePlayerScore(highestRank Rank) float64 {
-	if highestRank.Rank == "TOP500" {
+	if highestRank.Rank == "top500" {
 		return 4500
 	}
 	divisions, ok := r.RankData.Ranks[highestRank.Rank]
