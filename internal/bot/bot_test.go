@@ -21,7 +21,7 @@ func TestNewSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
-	if b.players == nil || b.recruitment == nil {
+	if b.players == nil || b.recruitments == nil || b.testDummies == nil {
 		t.Fatalf("New should initialize dependencies")
 	}
 }

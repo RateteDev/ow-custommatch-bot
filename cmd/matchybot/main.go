@@ -3,10 +3,12 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/RateteDev/MatchyBot/internal/bot"
 )
@@ -70,11 +72,32 @@ func requiredEnv(key string) (string, error) {
 	return value, nil
 }
 
+func setupLogger(exeDir string) (io.Closer, error) {
+	logDir := filepath.Join(exeDir, ".logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create log dir: %w", err)
+	}
+
+	logPath := filepath.Join(logDir, time.Now().Format("2006-01-02T15-04-05")+".log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open log file: %w", err)
+	}
+
+	log.SetOutput(io.MultiWriter(os.Stdout, f))
+	return f, nil
+}
+
 func main() {
 	exeDir, err := executableDir()
 	if err != nil {
 		log.Fatalf("failed to determine executable directory: %v", err)
 	}
+	closer, err := setupLogger(exeDir)
+	if err != nil {
+		log.Fatalf("failed to setup logger: %v", err)
+	}
+	defer closer.Close()
 
 	envPath := filepath.Join(exeDir, envFileName)
 	if err := loadEnvFile(envPath); err != nil {
