@@ -1,6 +1,6 @@
 # Context
 
-現在の MatchyBot は以下の実行時データを JSON で扱っています。
+現在の ow-custommatch-bot は以下の実行時データを JSON で扱っています。
 
 - `player_data.json`（プレイヤー情報、読み書きあり）
 - `vc_config.json`（VC 設定、読み書きあり）
@@ -18,11 +18,11 @@
 
 # 変更ファイル
 
-- `cmd/matchybot/main.go`
+- `cmd/ow-custommatch-bot/main.go`
   - 実行ファイル横の DB パス解決に変更
   - `rank.json` パス依存の削除
   - Bot 初期化引数の更新（SQLite + 埋め込みランク対応）
-- `cmd/matchybot/main_test.go`
+- `cmd/ow-custommatch-bot/main_test.go`
   - 実行ファイル基準パス運用のテスト補強
   - `rank.json` 不要化に伴う前提の更新
 - `internal/bot/bot.go`
@@ -42,7 +42,7 @@
   - SQLite 永続化のユニットテスト
   - JSON→SQLite 初回移行テスト
 - `README.md`
-  - 配布物/配置手順の更新（`rank.json` 配布不要、`matchybot.db` 自動作成）
+  - 配布物/配置手順の更新（`rank.json` 配布不要、`ow-custommatch-bot.db` 自動作成）
 - `docs/developer.md`
   - ビルド/実行時必要ファイルの更新
   - SQLite ドライバ依存（CGO 有無）に応じた注意事項追記
@@ -128,7 +128,7 @@ func LoadEmbeddedRankData() (RankDataFile, error) {
 ### 実装方針
 
 - SQLite ドライバは **pure Go 系を優先**（zip 配布/ビルド運用を簡素化するため）
-- DB ファイルは `matchybot.db` とし、実行ファイルと同ディレクトリに作成
+- DB ファイルは `ow-custommatch-bot.db` とし、実行ファイルと同ディレクトリに作成
 - 起動時に接続し、`CREATE TABLE IF NOT EXISTS ...` で初期化
 - `players` は `id` を主キーにした UPSERT で保存
 - `vc_config` は単一設定のため、最小構成は key-value または単行テーブル
@@ -196,7 +196,7 @@ CREATE TABLE IF NOT EXISTS vc_config (
 
 ### 目的
 
-- 実行ファイル横の `.env` / `matchybot.db` を前提に統一
+- 実行ファイル横の `.env` / `ow-custommatch-bot.db` を前提に統一
 - `rank.json` パスの受け渡しを削除
 
 ### 実装方針
@@ -204,7 +204,7 @@ CREATE TABLE IF NOT EXISTS vc_config (
 - 既存 `executableDir()` は継続利用（この方針と整合）
 - `main.go` では以下を生成
   - `envPath := <exeDir>/.env`
-  - `dbPath := <exeDir>/matchybot.db`
+  - `dbPath := <exeDir>/ow-custommatch-bot.db`
 - `bot.New(...)` シグネチャを更新
   - 例: `bot.New(dbPath string)`（内部で埋め込みランクと SQLite を初期化）
   - もしくは依存注入しやすい形で `bot.NewWithDeps(...)` を追加
@@ -228,7 +228,7 @@ CREATE TABLE IF NOT EXISTS vc_config (
 - `README.md`
   - 実行時に必要なファイルを `.env` のみに更新（DB は自動生成）
   - `rank.json` 配置手順を削除
-  - `matchybot.db` が初回起動で生成されることを明記
+  - `ow-custommatch-bot.db` が初回起動で生成されることを明記
   - `zip` 展開先は書き込み可能フォルダ推奨を明記
 - `docs/developer.md`
   - 開発時の確認手順を更新
@@ -237,7 +237,7 @@ CREATE TABLE IF NOT EXISTS vc_config (
 ### 手動確認項目
 
 - `bin/` に `.env` のみ配置して起動できること
-- `bin/matchybot.db` が生成されること
+- `bin/ow-custommatch-bot.db` が生成されること
 - 既存 `player_data.json` / `vc_config.json` を置いた状態で起動し、DB へ移行されること
 
 # 検証方法
@@ -253,18 +253,18 @@ go test ./...
 - `internal/model/` の SQLite CRUD
 - JSON→SQLite 初回移行
 - 埋め込みランク読込
-- `cmd/matchybot` のパス解決/環境変数読込（既存テストを維持・拡張）
+- `cmd/ow-custommatch-bot` のパス解決/環境変数読込（既存テストを維持・拡張）
 
 ## ビルド確認
 
 ```bash
 go build ./...
-go build -o bin/matchybot ./cmd/matchybot/
+go build -o bin/ow-custommatch-bot ./cmd/ow-custommatch-bot/
 ```
 
 ## 手動テスト
 
-1. 新規環境（`.env` のみ、DB/JSON なし）で起動し、`matchybot.db` 自動生成を確認
+1. 新規環境（`.env` のみ、DB/JSON なし）で起動し、`ow-custommatch-bot.db` 自動生成を確認
 2. 既存 JSON 環境（`player_data.json`, `vc_config.json` あり）で起動し、データ移行後に従来動作することを確認
 3. Discord 上でランク登録 → エントリー → チーム分け → VC 作成/再利用を確認
 4. 再起動後にプレイヤー情報・VC 設定が維持されることを確認
@@ -277,7 +277,7 @@ go build -o bin/matchybot ./cmd/matchybot/
   - `internal/model/sqlite_store.go` / `internal/model/sqlite_store_test.go` を追加し、SQLite 永続化層（`players` / `vc_config`）を実装
   - `internal/model/player_data_manager.go` / `internal/model/vc_config.go` を SQLite バックエンド対応
   - `internal/bot/bot.go` の `bot.New(...)` を SQLite 初期化前提（`dbPath` のみ）へ変更
-  - `cmd/matchybot/main.go` を `.env` + `matchybot.db` 前提に変更（実行ファイル横に DB 自動作成）
+  - `cmd/ow-custommatch-bot/main.go` を `.env` + `ow-custommatch-bot.db` 前提に変更（実行ファイル横に DB 自動作成）
   - `README.md` / `docs/developer.md` を現行配布仕様（zip 配布、`rank` 埋め込み、SQLite 自動生成）へ更新
   - `data/rank.json` を削除（`internal/model/rankdata/rank.json` に一本化）
 - 仕様変更 / プランとの差分
@@ -287,7 +287,7 @@ go build -o bin/matchybot ./cmd/matchybot/
   - ユニットテスト: `go test ./...` ✅
   - ビルド確認: `go build ./...` ✅
   - 手動テスト（Discord）: `rank.json` なし起動、ランク登録、エントリー、振り分け成功 ✅
-  - 手動テスト（Discord）: `bin/` をクリアして `.env` + バイナリのみで起動、`matchybot.db` 自動生成 ✅
+  - 手動テスト（Discord）: `bin/` をクリアして `.env` + バイナリのみで起動、`ow-custommatch-bot.db` 自動生成 ✅
   - 手動テスト（Discord）: 再起動後もデータ保持（ユーザー確認）✅
 
 ## 次期改善事項

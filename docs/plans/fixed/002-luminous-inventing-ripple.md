@@ -120,7 +120,7 @@ func (b *Bot) registerCommands() error {
         Name:        "match",
         Description: "マッチングの募集を開始します",
     }
-    if os.Getenv("MATCHYBOT_TEST_MODE") == "true" {
+    if os.Getenv("OW_CUSTOMMATCH_BOT_TEST_MODE") == "true" {
         cmd.Options = []*discordgo.ApplicationCommandOption{ /* 修正4 参照 */ }
     }
 
@@ -132,13 +132,13 @@ func (b *Bot) registerCommands() error {
 
 ---
 
-## 修正4: テストモード（環境変数 `MATCHYBOT_TEST_MODE=true` 時のみ有効）
+## 修正4: テストモード（環境変数 `OW_CUSTOMMATCH_BOT_TEST_MODE=true` 時のみ有効）
 
 ### 概要
 
 | 項目 | 内容 |
 |------|------|
-| 有効条件 | 環境変数 `MATCHYBOT_TEST_MODE=true` |
+| 有効条件 | 環境変数 `OW_CUSTOMMATCH_BOT_TEST_MODE=true` |
 | `fill` オプション | 環境変数 OFF 時はコマンドに表示されない |
 | ダミー人数 | `rand.Intn(41) + 20`（20〜60 人のランダム） |
 | ダミーランク | bronze〜grandmaster をランダム付与（division も乱数） |
@@ -161,7 +161,7 @@ type Bot struct {
 ### コマンド定義（`registerCommands` 内）
 
 ```go
-if os.Getenv("MATCHYBOT_TEST_MODE") == "true" {
+if os.Getenv("OW_CUSTOMMATCH_BOT_TEST_MODE") == "true" {
     cmd.Options = []*discordgo.ApplicationCommandOption{
         {
             Type:        discordgo.ApplicationCommandOptionBoolean,
@@ -179,9 +179,9 @@ if os.Getenv("MATCHYBOT_TEST_MODE") == "true" {
 // 新規マッチ開始時に testDummies をリセット
 b.testDummies = make(map[string]model.PlayerInfo)
 
-// fill オプション判定（MATCHYBOT_TEST_MODE=true 時のみ options が存在）
+// fill オプション判定（OW_CUSTOMMATCH_BOT_TEST_MODE=true 時のみ options が存在）
 fillMode := false
-if os.Getenv("MATCHYBOT_TEST_MODE") == "true" {
+if os.Getenv("OW_CUSTOMMATCH_BOT_TEST_MODE") == "true" {
     for _, opt := range i.ApplicationCommandData().Options {
         if opt.Name == "fill" {
             fillMode = opt.BoolValue()
@@ -330,10 +330,10 @@ func (b *Bot) updateRecruitEmbed(s *discordgo.Session, disabled bool) error {
 
 ```bash
 # NG（作業ディレクトリが /home/user/workspace/repos だったため無効）
-go build -o bin/matchybot ./cmd/matchybot/
+go build -o bin/ow-custommatch-bot ./cmd/ow-custommatch-bot/
 
 # OK（絶対パスで指定）
-go build -o /home/user/workspace/repos/MatchyBot/bin/matchybot /home/user/workspace/repos/MatchyBot/cmd/matchybot/
+go build -o /home/user/workspace/repos/ow-custommatch-bot/bin/ow-custommatch-bot /home/user/workspace/repos/ow-custommatch-bot/cmd/ow-custommatch-bot/
 ```
 
 **対応**: 正しいパスでリビルド済み（`11:41` タイムスタンプ）。ただし Discord 側の再確認は未実施。
@@ -344,7 +344,7 @@ go build -o /home/user/workspace/repos/MatchyBot/bin/matchybot /home/user/worksp
 |------|------|
 | ソース変更 | ✅ 完了 |
 | ユニットテスト | ✅ 全件パス |
-| バイナリリビルド | ✅ 完了（`bin/matchybot` 11:41 更新） |
+| バイナリリビルド | ✅ 完了（`bin/ow-custommatch-bot` 11:41 更新） |
 | Discord 動作確認 | ⬜ 未完了（リビルド後の再確認が必要） |
 
 ---
@@ -371,6 +371,6 @@ go test ./...
 | 5 | 10人エントリー後「振り分け」 | チーム結果が投稿される。Embed・ボタンは閉じない |
 | 6 | 再度「振り分け」 | 同じメンバーで再振り分け可能 |
 | 7 | 発案者が「中止」 | Embed が**赤色**で「🚫 募集は中止されました」、ボタン無効化 |
-| 8 | `MATCHYBOT_TEST_MODE=true` で Bot 起動 | `/match` に `fill` オプションが表示される |
+| 8 | `OW_CUSTOMMATCH_BOT_TEST_MODE=true` で Bot 起動 | `/match` に `fill` オプションが表示される |
 | 9 | `/match fill:True` 実行 | Embed にダミー参加者（20〜60人）が名前で表示される |
 | 10 | fill モードで「振り分け」 | チーム結果が「（テストモード）」付きで投稿 |

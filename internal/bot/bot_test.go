@@ -5,13 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/RateteDev/MatchyBot/internal/model"
+	"github.com/RateteDev/ow-custommatch-bot/internal/model"
 	"github.com/bwmarrin/discordgo"
 )
 
 func TestNewSuccess(t *testing.T) {
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "matchybot.db")
+	dbPath := filepath.Join(dir, "ow-custommatch-bot.db")
 
 	b, err := New(dbPath)
 	if err != nil {
@@ -24,7 +24,7 @@ func TestNewSuccess(t *testing.T) {
 
 func TestNewErrors(t *testing.T) {
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "nested", "matchybot.db")
+	dbPath := filepath.Join(dir, "nested", "ow-custommatch-bot.db")
 
 	if _, err := New(dbPath); err == nil {
 		t.Fatalf("expected error when db directory does not exist")

@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/RateteDev/MatchyBot/internal/model"
+	"github.com/RateteDev/ow-custommatch-bot/internal/model"
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -93,7 +93,7 @@ func (b *Bot) Run(token string) error {
 		return err
 	}
 
-	log.Printf("MatchyBot (Go) is running with %d registered players", len(b.players.Data.Players))
+	log.Printf("ow-custommatch-bot (Go) is running with %d registered players", len(b.players.Data.Players))
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
@@ -107,7 +107,7 @@ func (b *Bot) registerCommands() error {
 		Name:        "match",
 		Description: "マッチングの募集を開始します",
 	}
-	if os.Getenv("MATCHYBOT_TEST_MODE") == "true" {
+	if os.Getenv("OW_CUSTOMMATCH_BOT_TEST_MODE") == "true" {
 		matchCmd.Options = []*discordgo.ApplicationCommandOption{
 			{
 				Type:        discordgo.ApplicationCommandOptionBoolean,
@@ -180,7 +180,7 @@ func (b *Bot) handleMatchStart(s *discordgo.Session, i *discordgo.InteractionCre
 	b.recruitments[channelID] = r
 	b.testDummies[channelID] = make(map[string]model.PlayerInfo)
 
-	if os.Getenv("MATCHYBOT_TEST_MODE") == "true" && matchStartFillMode(i) {
+	if os.Getenv("OW_CUSTOMMATCH_BOT_TEST_MODE") == "true" && matchStartFillMode(i) {
 		b.injectTestDummies(channelID, r)
 	}
 
@@ -614,7 +614,7 @@ func (b *Bot) ensureVCChannels(s *discordgo.Session, guildID string, teamCount i
 		b.vcConfig.Data.VCChannelIDs = []string{}
 
 		ch, err := s.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{
-			Name: "MatchyBot",
+			Name: "ow-custommatch-bot",
 			Type: discordgo.ChannelTypeGuildCategory,
 		})
 		if err != nil {

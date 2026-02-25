@@ -1,6 +1,6 @@
 # 開発者向けガイド
 
-このドキュメントは、MatchyBot をソースコードから変更・ビルドする開発者向けです。
+このドキュメントは、ow-custommatch-bot をソースコードから変更・ビルドする開発者向けです。
 
 ## 必要なもの
 
@@ -25,19 +25,19 @@ go mod tidy
 ## ビルド
 
 ```bash
-go build -o bin/matchybot ./cmd/matchybot
+go build -o bin/ow-custommatch-bot ./cmd/ow-custommatch-bot
 ```
 
 Windows 向け exe:
 
 ```bash
-GOOS=windows GOARCH=amd64 go build -o bin/matchybot.exe ./cmd/matchybot
+GOOS=windows GOARCH=amd64 go build -o bin/ow-custommatch-bot.exe ./cmd/ow-custommatch-bot
 ```
 
 ## 実行時に必要なファイル（bin 配下）
 
 - `.env`（`BOT_TOKEN` を設定）
-- `matchybot.db`（初回起動時に自動生成されるため事前作成不要）
+- `ow-custommatch-bot.db`（初回起動時に自動生成されるため事前作成不要）
 
 ```bash
 cp .env.example bin/.env
@@ -46,7 +46,7 @@ cp .env.example bin/.env
 補足:
 
 - ランクマスタは `go:embed` でバイナリに埋め込まれています。
-- `matchybot.db` は実行ファイルと同じディレクトリに作成されます。
+- `ow-custommatch-bot.db` は実行ファイルと同じディレクトリに作成されます。
 
 ## テスト
 

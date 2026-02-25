@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/RateteDev/MatchyBot/internal/bot"
+	"github.com/RateteDev/ow-custommatch-bot/internal/bot"
 )
 
 const (
 	envFileName = ".env"
-	dbFileName  = "matchybot.db"
+	dbFileName  = "ow-custommatch-bot.db"
 )
 
 func executableDir() (string, error) {

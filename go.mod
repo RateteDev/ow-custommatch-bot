@@ -1,4 +1,4 @@
-module github.com/RateteDev/MatchyBot
+module github.com/RateteDev/ow-custommatch-bot
 
 go 1.26.0
 

@@ -16,7 +16,7 @@
 | `internal/bot/bot.go` | 要件1・2（全て） |
 | `internal/model/vc_config.go`（新規） | 要件2（VCConfig 永続化） |
 | `internal/model/recruitment.go` | 要件2（GuildID フィールド追加） |
-| `cmd/matchybot/main.go` | 要件2（vcConfigPath を New() に渡す） |
+| `cmd/ow-custommatch-bot/main.go` | 要件2（vcConfigPath を New() に渡す） |
 
 ---
 
@@ -41,7 +41,7 @@
 
 - **クリック移動**（強制移動なし）: 招待リンクをFieldに埋め込む
 - **一時作成 + 永続化**: 初回振り分け時にカテゴリ・VCを作成し ID を保存、次回以降は再利用
-- **カテゴリ名**: `MatchyBot`（固定）
+- **カテゴリ名**: `ow-custommatch-bot`（固定）
 - **VC名**: `チームA`, `チームB`, ...（`teamLabel` に合わせる）
 
 ### 招待リンク仕様
@@ -103,7 +103,7 @@ type Recruitment struct {
 
 ---
 
-### `cmd/matchybot/main.go` の変更
+### `cmd/ow-custommatch-bot/main.go` の変更
 
 ```go
 const vcConfigFileName = "vc_config.json"   // 追加
@@ -197,7 +197,7 @@ go test ./...
 | # | 操作 | 期待結果 |
 |---|------|---------|
 | 1 | 「中止」ボタン押下 | Embed が赤色になり、ボタンが消える（無効化ではなく削除）|
-| 2 | 初回「振り分け」押下 | `MatchyBot` カテゴリと `チームA`〜 VC が作成される |
+| 2 | 初回「振り分け」押下 | `ow-custommatch-bot` カテゴリと `チームA`〜 VC が作成される |
 | 3 | 振り分け結果 Embed | 各チーム Field の末尾に `📢 VCに参加` リンクが表示される |
 | 4 | リンクをクリック | 対応するVCチャンネルに参加できる |
 | 5 | 2回目の「振り分け」押下 | 既存 VC を再利用し、新規作成されない |
@@ -216,7 +216,7 @@ go test ./...
 |---------|---------|
 | `internal/model/vc_config.go`（新規） | `VCConfig` / `VCConfigManager`（Load/Save）追加 |
 | `internal/model/recruitment.go` | `Recruitment` に `GuildID string` 追加 |
-| `cmd/matchybot/main.go` | `vcConfigFileName` 定数・`vcConfigPath` 生成・`bot.New` 第3引数追加 |
+| `cmd/ow-custommatch-bot/main.go` | `vcConfigFileName` 定数・`vcConfigPath` 生成・`bot.New` 第3引数追加 |
 | `internal/bot/bot.go` | `Bot.vcConfig` フィールド・`New` シグネチャ変更・`handleMatchStart` で `r.GuildID = i.GuildID`・`handleAssign` にVC確保＋招待リンク並列生成追加・`ensureVCChannels` / `isDiscord404` 新規追加 |
 | `internal/bot/bot_test.go` | `bot.New()` 第3引数追加に合わせてテスト修正 |
 | `.gitignore` | `bin/vc_config.json` 追記 |
@@ -226,7 +226,7 @@ go test ./...
 | # | 操作 | 結果 |
 |---|------|------|
 | 1 | 「中止」ボタン押下 | Embed が赤色になりボタンが消えることを確認 ✅ |
-| 2 | 初回「振り分け」押下 | `MatchyBot` カテゴリと `チームA`〜 VC が作成された ✅ |
+| 2 | 初回「振り分け」押下 | `ow-custommatch-bot` カテゴリと `チームA`〜 VC が作成された ✅ |
 | 3 | 振り分け結果 Embed | 各チーム Field の末尾に `📢 VCに参加` リンクが表示された ✅ |
 | 4 | リンクをクリック | 対応するVCチャンネルに参加できた ✅ |
 

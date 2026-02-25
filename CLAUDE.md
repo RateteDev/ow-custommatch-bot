@@ -1,9 +1,9 @@
-# MatchyBot — CLAUDE.md
+# ow-custommatch-bot — CLAUDE.md
 
 ## プロジェクト構造
 
 ```
-cmd/matchybot/          エントリーポイント（main.go）
+cmd/ow-custommatch-bot/          エントリーポイント（main.go）
 internal/bot/           Discord Bot 本体・全ハンドラー（bot.go）
 internal/model/         データモデル・ビジネスロジック
   recruitment.go        募集データ・チーム分けロジック
@@ -58,11 +58,11 @@ go build ./...   # ビルドエラーなし
 ### 4. 動作確認
 
 ```bash
-go build -o bin/matchybot ./cmd/matchybot/
-./bin/matchybot
+go build -o bin/ow-custommatch-bot ./cmd/ow-custommatch-bot/
+./bin/ow-custommatch-bot
 ```
 
-起動ログ（`Logged in as ...` / `MatchyBot (Go) is running`）を確認後、
+起動ログ（`Logged in as ...` / `ow-custommatch-bot (Go) is running`）を確認後、
 Discord で手動テスト項目を実施する。
 
 ### 5. プランファイルへの実装結果記録
@@ -87,8 +87,8 @@ Discord で手動テスト項目を実施する。
 ```bash
 go test ./...                              # 全パッケージのユニットテスト
 go build ./...                             # 全パッケージのビルド確認
-go build -o bin/matchybot ./cmd/matchybot/ # 実行バイナリのビルド
-./bin/matchybot                            # Bot 起動
+go build -o bin/ow-custommatch-bot ./cmd/ow-custommatch-bot/ # 実行バイナリのビルド
+./bin/ow-custommatch-bot                            # Bot 起動
 ```
 
 ---
