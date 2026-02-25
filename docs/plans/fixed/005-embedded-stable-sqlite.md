@@ -268,3 +268,31 @@ go build -o bin/matchybot ./cmd/matchybot/
 2. 既存 JSON 環境（`player_data.json`, `vc_config.json` あり）で起動し、データ移行後に従来動作することを確認
 3. Discord 上でランク登録 → エントリー → チーム分け → VC 作成/再利用を確認
 4. 再起動後にプレイヤー情報・VC 設定が維持されることを確認
+
+## 実装結果
+
+- 実装ファイル一覧（主な変更）
+  - `internal/model/rank_data_embedded.go` を追加し、ランクマスタを `go:embed` で読込
+  - `internal/model/rankdata/rank.json` をランクマスタの正本として配置
+  - `internal/model/sqlite_store.go` / `internal/model/sqlite_store_test.go` を追加し、SQLite 永続化層（`players` / `vc_config`）を実装
+  - `internal/model/player_data_manager.go` / `internal/model/vc_config.go` を SQLite バックエンド対応
+  - `internal/bot/bot.go` の `bot.New(...)` を SQLite 初期化前提（`dbPath` のみ）へ変更
+  - `cmd/matchybot/main.go` を `.env` + `matchybot.db` 前提に変更（実行ファイル横に DB 自動作成）
+  - `README.md` / `docs/developer.md` を現行配布仕様（zip 配布、`rank` 埋め込み、SQLite 自動生成）へ更新
+  - `data/rank.json` を削除（`internal/model/rankdata/rank.json` に一本化）
+- 仕様変更 / プランとの差分
+  - 要件3で計画していた **JSON→SQLite 初回移行処理は実装しない方針** に変更（後方互換不要のため）
+  - `player_data.json` / `vc_config.json` は読み込まず、SQLite を唯一の永続化形式とした
+- 動作確認結果
+  - ユニットテスト: `go test ./...` ✅
+  - ビルド確認: `go build ./...` ✅
+  - 手動テスト（Discord）: `rank.json` なし起動、ランク登録、エントリー、振り分け成功 ✅
+  - 手動テスト（Discord）: `bin/` をクリアして `.env` + バイナリのみで起動、`matchybot.db` 自動生成 ✅
+  - 手動テスト（Discord）: 再起動後もデータ保持（ユーザー確認）✅
+
+## 次期改善事項
+
+- `SQLiteStore` のライフサイクル管理を `Bot` 側で明示し、終了時に `Close()` を呼ぶ設計に整理する
+- `b.players.Data` / `b.vcConfig.Data` への並行アクセスに対する排他制御（`sync.Mutex` 等）を検討する
+- SQLite スキーマのバージョン管理（`PRAGMA user_version` 等）を導入し、将来のテーブル変更に備える
+- `docs/plans/fixed/005-embedded-stable-sqlite.md` の「手動テスト」欄は最終仕様に合わせて（JSON移行確認項目を削除して）整合を取る余地がある
