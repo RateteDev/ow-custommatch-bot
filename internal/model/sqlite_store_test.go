@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestNewSQLiteStoreCreatesDBAndSchema(t *testing.T) {
@@ -37,9 +38,10 @@ func TestSQLiteStoreUpsertPlayerAndReload(t *testing.T) {
 	}
 
 	if err := store.UpsertPlayer(PlayerInfo{
-		ID:       "u1",
-		Name:     "alice",
-		MainRole: "tank",
+		ID:            "u1",
+		Name:          "alice",
+		MainRole:      "tank",
+		RankUpdatedAt: "2026-01-25T09:00:00Z",
 		HighestRank: Rank{
 			Rank:     "gold",
 			Division: "2",
@@ -49,9 +51,10 @@ func TestSQLiteStoreUpsertPlayerAndReload(t *testing.T) {
 	}
 
 	if err := store.UpsertPlayer(PlayerInfo{
-		ID:       "u1",
-		Name:     "alice2",
-		MainRole: "support",
+		ID:            "u1",
+		Name:          "alice2",
+		MainRole:      "support",
+		RankUpdatedAt: "2026-02-25T09:00:00Z",
 		HighestRank: Rank{
 			Rank:     "platinum",
 			Division: "4",
@@ -73,6 +76,9 @@ func TestSQLiteStoreUpsertPlayerAndReload(t *testing.T) {
 	if got.HighestRank.Rank != "platinum" || got.HighestRank.Division != "4" {
 		t.Fatalf("unexpected highest rank after update: %#v", got.HighestRank)
 	}
+	if got.RankUpdatedAt != "2026-02-25T09:00:00Z" {
+		t.Fatalf("unexpected rank updated at after update: %s", got.RankUpdatedAt)
+	}
 
 	if err := store.Close(); err != nil {
 		t.Fatalf("Close failed: %v", err)
@@ -90,6 +96,39 @@ func TestSQLiteStoreUpsertPlayerAndReload(t *testing.T) {
 	}
 	if got == nil || got.Name != "alice2" {
 		t.Fatalf("expected player to persist after reload, got %#v", got)
+	}
+	if got.RankUpdatedAt != "2026-02-25T09:00:00Z" {
+		t.Fatalf("expected rank updated at to persist after reload, got %q", got.RankUpdatedAt)
+	}
+}
+
+func TestSQLiteStoreUpsertPlayerSavesRankUpdatedAt(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "matchybot.db")
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore failed: %v", err)
+	}
+	defer store.Close()
+
+	ts := time.Date(2026, 2, 25, 9, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	if err := store.UpsertPlayer(PlayerInfo{
+		ID:            "u-rank",
+		Name:          "ranked",
+		HighestRank:   Rank{Rank: "gold", Division: "1"},
+		RankUpdatedAt: ts,
+	}); err != nil {
+		t.Fatalf("UpsertPlayer failed: %v", err)
+	}
+
+	got, err := store.GetPlayerByID("u-rank")
+	if err != nil {
+		t.Fatalf("GetPlayerByID failed: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("expected player to exist")
+	}
+	if got.RankUpdatedAt != ts {
+		t.Fatalf("unexpected rank updated at: got %q want %q", got.RankUpdatedAt, ts)
 	}
 }
 
