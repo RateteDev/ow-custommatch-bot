@@ -7,10 +7,11 @@ import (
 )
 
 type PlayerInfo struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	MainRole    string `json:"main_role,omitempty"`
-	HighestRank Rank   `json:"highest_rank,omitempty"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	MainRole      string `json:"main_role,omitempty"`
+	HighestRank   Rank   `json:"highest_rank,omitempty"`
+	RankUpdatedAt string `json:"rank_updated_at,omitempty"`
 }
 
 type PlayersFile struct {

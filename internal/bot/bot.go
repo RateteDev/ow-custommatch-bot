@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/RateteDev/MatchyBot/internal/model"
 	"github.com/bwmarrin/discordgo"
@@ -22,12 +23,24 @@ type Bot struct {
 	recruitments         map[string]*model.Recruitment
 	pendingRegistrations map[string]pendingRegEntry
 	testDummies          map[string]map[string]model.PlayerInfo
+	now                  func() time.Time
 }
 
 type pendingRegEntry struct {
 	rank      string
 	channelID string
+	autoEntry bool
 }
+
+const rankRegistrationValidDuration = 30 * 24 * time.Hour
+
+type rankRegistrationPromptType int
+
+const (
+	rankRegistrationPromptNew rankRegistrationPromptType = iota
+	rankRegistrationPromptRefresh
+	rankRegistrationPromptManual
+)
 
 func New(dbPath string) (*Bot, error) {
 	store, err := model.NewSQLiteStore(dbPath)
@@ -55,6 +68,7 @@ func New(dbPath string) (*Bot, error) {
 		recruitments:         make(map[string]*model.Recruitment),
 		pendingRegistrations: make(map[string]pendingRegEntry),
 		testDummies:          make(map[string]map[string]model.PlayerInfo),
+		now:                  time.Now,
 	}, nil
 }
 
@@ -89,12 +103,12 @@ func (b *Bot) Run(token string) error {
 func (b *Bot) registerCommands() error {
 	appID := b.session.State.User.ID
 
-	cmd := &discordgo.ApplicationCommand{
+	matchCmd := &discordgo.ApplicationCommand{
 		Name:        "match",
 		Description: "マッチングの募集を開始します",
 	}
 	if os.Getenv("MATCHYBOT_TEST_MODE") == "true" {
-		cmd.Options = []*discordgo.ApplicationCommandOption{
+		matchCmd.Options = []*discordgo.ApplicationCommandOption{
 			{
 				Type:        discordgo.ApplicationCommandOptionBoolean,
 				Name:        "fill",
@@ -104,7 +118,12 @@ func (b *Bot) registerCommands() error {
 		}
 	}
 
-	_, err := b.session.ApplicationCommandBulkOverwrite(appID, "", []*discordgo.ApplicationCommand{cmd})
+	registerRankCmd := &discordgo.ApplicationCommand{
+		Name:        "register_rank",
+		Description: "チーム分けに使用するランクを登録・更新します",
+	}
+
+	_, err := b.session.ApplicationCommandBulkOverwrite(appID, "", []*discordgo.ApplicationCommand{matchCmd, registerRankCmd})
 	return err
 }
 
@@ -122,6 +141,8 @@ func (b *Bot) onInteractionCreate(s *discordgo.Session, i *discordgo.Interaction
 		switch i.ApplicationCommandData().Name {
 		case "match":
 			b.handleMatchStart(s, i)
+		case "register_rank":
+			b.handleRegisterRank(s, i)
 		}
 	case discordgo.InteractionMessageComponent:
 		switch i.MessageComponentData().CustomID {
@@ -167,7 +188,7 @@ func (b *Bot) handleMatchStart(s *discordgo.Session, i *discordgo.InteractionCre
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Embeds:     []*discordgo.MessageEmbed{buildRecruitEmbed(r, "🎮 マッチング募集", 0x2ECC71)},
-			Components: b.buildRecruitComponents(false),
+			Components: b.buildRecruitComponents(r, false),
 		},
 	})
 	if err != nil {
@@ -205,8 +226,15 @@ func (b *Bot) handleEntry(s *discordgo.Session, i *discordgo.InteractionCreate) 
 	if player == nil || player.HighestRank.Rank == "" {
 		// ランク未登録の間は募集一覧に入れず、登録完了後に自動エントリーする。
 		r.RemoveEntry(userID)
-		if err := b.respondRankRegistrationPrompt(s, i); err != nil {
+		if err := b.startRankRegistrationFlow(s, i, rankRegistrationPromptNew, true); err != nil {
 			log.Printf("failed to start rank registration flow: %v", err)
+		}
+		return
+	}
+	if b.isRankRegistrationExpired(player) {
+		r.RemoveEntry(userID)
+		if err := b.startRankRegistrationFlow(s, i, rankRegistrationPromptRefresh, true); err != nil {
+			log.Printf("failed to start rank refresh flow: %v", err)
 		}
 		return
 	}
@@ -225,15 +253,6 @@ func (b *Bot) handleEntry(s *discordgo.Session, i *discordgo.InteractionCreate) 
 }
 
 func (b *Bot) handleRankSelect(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	channelID := i.ChannelID
-	r, ok := b.recruitments[channelID]
-	if !ok || !r.IsOpen {
-		if err := b.updateComponentWithText(s, i, "募集は終了しています"); err != nil {
-			log.Printf("failed to respond closed recruitment on rank select: %v", err)
-		}
-		return
-	}
-
 	data := i.MessageComponentData()
 	if len(data.Values) == 0 {
 		if err := b.updateComponentWithText(s, i, "ランクが選択されていません"); err != nil {
@@ -244,7 +263,15 @@ func (b *Bot) handleRankSelect(s *discordgo.Session, i *discordgo.InteractionCre
 
 	userID, name := interactionUser(i)
 	selectedRank := data.Values[0]
-	b.pendingRegistrations[userID] = pendingRegEntry{rank: selectedRank, channelID: i.ChannelID}
+	entry, ok := b.pendingRegistrations[userID]
+	if !ok {
+		if err := b.updateComponentWithText(s, i, "ランク登録を最初からやり直してください"); err != nil {
+			log.Printf("failed to respond missing pending registration on rank select: %v", err)
+		}
+		return
+	}
+	entry.rank = selectedRank
+	b.pendingRegistrations[userID] = entry
 
 	if selectedRank == "top500" {
 		if err := b.savePlayerRank(userID, name, "top500", ""); err != nil {
@@ -253,13 +280,20 @@ func (b *Bot) handleRankSelect(s *discordgo.Session, i *discordgo.InteractionCre
 			return
 		}
 		delete(b.pendingRegistrations, userID)
-		r.AddEntry(userID, name)
-		if err := b.updateRecruitEmbed(s, r, false); err != nil {
-			log.Printf("failed to update recruit embed after top500 entry: %v", err)
-			_ = b.updateComponentWithText(s, i, "ランク登録後の更新に失敗しました")
-			return
+		if entry.autoEntry {
+			r, ok := b.recruitments[entry.channelID]
+			if !ok || !r.IsOpen {
+				_ = b.updateComponentWithText(s, i, "募集は終了しています")
+				return
+			}
+			r.AddEntry(userID, name)
+			if err := b.updateRecruitEmbed(s, r, false); err != nil {
+				log.Printf("failed to update recruit embed after top500 entry: %v", err)
+				_ = b.updateComponentWithText(s, i, "ランク登録後の更新に失敗しました")
+				return
+			}
 		}
-		if err := b.updateComponentWithText(s, i, "✅ ランクを登録し、エントリーしました！"); err != nil {
+		if err := b.updateComponentWithText(s, i, b.rankRegistrationCompleteMessage(entry.autoEntry)); err != nil {
 			log.Printf("failed to update rank select message: %v", err)
 		}
 		return
@@ -279,15 +313,6 @@ func (b *Bot) handleRankSelect(s *discordgo.Session, i *discordgo.InteractionCre
 }
 
 func (b *Bot) handleDivisionSelect(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	channelID := i.ChannelID
-	r, ok := b.recruitments[channelID]
-	if !ok || !r.IsOpen {
-		if err := b.updateComponentWithText(s, i, "募集は終了しています"); err != nil {
-			log.Printf("failed to respond closed recruitment on division select: %v", err)
-		}
-		return
-	}
-
 	data := i.MessageComponentData()
 	if len(data.Values) == 0 {
 		if err := b.updateComponentWithText(s, i, "ディビジョンが選択されていません"); err != nil {
@@ -304,13 +329,6 @@ func (b *Bot) handleDivisionSelect(s *discordgo.Session, i *discordgo.Interactio
 		}
 		return
 	}
-	r, ok = b.recruitments[entry.channelID]
-	if !ok || !r.IsOpen {
-		if err := b.updateComponentWithText(s, i, "募集は終了しています"); err != nil {
-			log.Printf("failed to respond closed recruitment on pending division select: %v", err)
-		}
-		return
-	}
 
 	div := data.Values[0]
 	if err := b.savePlayerRank(userID, name, entry.rank, div); err != nil {
@@ -320,15 +338,30 @@ func (b *Bot) handleDivisionSelect(s *discordgo.Session, i *discordgo.Interactio
 	}
 	delete(b.pendingRegistrations, userID)
 
-	r.AddEntry(userID, name)
-	if err := b.updateRecruitEmbed(s, r, false); err != nil {
-		log.Printf("failed to update recruit embed after division select: %v", err)
-		_ = b.updateComponentWithText(s, i, "ランク登録後の更新に失敗しました")
-		return
+	if entry.autoEntry {
+		r, ok := b.recruitments[entry.channelID]
+		if !ok || !r.IsOpen {
+			if err := b.updateComponentWithText(s, i, "募集は終了しています"); err != nil {
+				log.Printf("failed to respond closed recruitment on pending division select: %v", err)
+			}
+			return
+		}
+		r.AddEntry(userID, name)
+		if err := b.updateRecruitEmbed(s, r, false); err != nil {
+			log.Printf("failed to update recruit embed after division select: %v", err)
+			_ = b.updateComponentWithText(s, i, "ランク登録後の更新に失敗しました")
+			return
+		}
 	}
 
-	if err := b.updateComponentWithText(s, i, "✅ ランクを登録し、エントリーしました！"); err != nil {
+	if err := b.updateComponentWithText(s, i, b.rankRegistrationCompleteMessage(entry.autoEntry)); err != nil {
 		log.Printf("failed to update division select message: %v", err)
+	}
+}
+
+func (b *Bot) handleRegisterRank(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if err := b.startRankRegistrationFlow(s, i, rankRegistrationPromptManual, false); err != nil {
+		log.Printf("failed to start manual rank registration flow: %v", err)
 	}
 }
 
@@ -528,6 +561,12 @@ func (b *Bot) handleAssign(s *discordgo.Session, i *discordgo.InteractionCreate)
 		if err := b.followupEphemeralText(s, i, "チーム振り分け結果の送信に失敗しました"); err != nil {
 			log.Printf("failed to respond assign post error: %v", err)
 		}
+		return
+	}
+
+	r.HasAssigned = true
+	if err := b.updateRecruitEmbed(s, r, false); err != nil {
+		log.Printf("failed to update recruit embed after assign result post: %v", err)
 	}
 }
 
@@ -685,7 +724,7 @@ func (b *Bot) updateRecruitEmbed(s *discordgo.Session, r *model.Recruitment, dis
 	}
 
 	embed := buildRecruitEmbed(r, "🎮 マッチング募集", 0x2ECC71)
-	components := b.buildRecruitComponents(disabled)
+	components := b.buildRecruitComponents(r, disabled)
 	edit := discordgo.NewMessageEdit(r.ChannelID, r.MessageID)
 	edit.Embeds = &[]*discordgo.MessageEmbed{embed}
 	edit.Components = &components
@@ -748,7 +787,11 @@ func recruitParticipantList(r *model.Recruitment) string {
 	return strings.Join(users, "\n")
 }
 
-func (b *Bot) buildRecruitComponents(disabled bool) []discordgo.MessageComponent {
+func (b *Bot) buildRecruitComponents(r *model.Recruitment, disabled bool) []discordgo.MessageComponent {
+	assignLabel := "🎲 振り分け"
+	if r != nil && r.HasAssigned {
+		assignLabel = "🔁 再振り分け"
+	}
 	return []discordgo.MessageComponent{
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
@@ -769,7 +812,7 @@ func (b *Bot) buildRecruitComponents(disabled bool) []discordgo.MessageComponent
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
 				discordgo.Button{
-					Label:    "🎲 振り分け",
+					Label:    assignLabel,
 					CustomID: "assign",
 					Style:    discordgo.DangerButton,
 					Disabled: disabled,
@@ -785,15 +828,30 @@ func (b *Bot) buildRecruitComponents(disabled bool) []discordgo.MessageComponent
 	}
 }
 
-func (b *Bot) respondRankRegistrationPrompt(s *discordgo.Session, i *discordgo.InteractionCreate) error {
+func (b *Bot) startRankRegistrationFlow(s *discordgo.Session, i *discordgo.InteractionCreate, promptType rankRegistrationPromptType, autoEntry bool) error {
+	userID, _ := interactionUser(i)
+	if userID == "" {
+		return fmt.Errorf("interaction user not found")
+	}
+	if err := b.respondRankRegistrationPrompt(s, i, promptType); err != nil {
+		return err
+	}
+	b.pendingRegistrations[userID] = pendingRegEntry{
+		channelID: i.ChannelID,
+		autoEntry: autoEntry,
+	}
+	return nil
+}
+
+func (b *Bot) respondRankRegistrationPrompt(s *discordgo.Session, i *discordgo.InteractionCreate, promptType rankRegistrationPromptType) error {
 	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Flags: discordgo.MessageFlagsEphemeral,
 			Embeds: []*discordgo.MessageEmbed{
 				{
-					Title:       "📝 ランク登録",
-					Description: "チーム分けのためランクを登録してください。登録後、自動的にエントリーされます。",
+					Title:       b.rankRegistrationPromptTitle(promptType),
+					Description: b.rankRegistrationPromptDescription(promptType),
 					Color:       0x3498DB,
 				},
 			},
@@ -824,6 +882,24 @@ func (b *Bot) buildRankSelectComponents() []discordgo.MessageComponent {
 				},
 			},
 		},
+	}
+}
+
+func (b *Bot) rankRegistrationPromptTitle(promptType rankRegistrationPromptType) string {
+	if promptType == rankRegistrationPromptRefresh {
+		return "🔄 ランク再登録"
+	}
+	return "📝 ランク登録"
+}
+
+func (b *Bot) rankRegistrationPromptDescription(promptType rankRegistrationPromptType) string {
+	switch promptType {
+	case rankRegistrationPromptRefresh:
+		return "ランク登録から30日が経過しています。ロール内での最高ランクを選択してください。登録後、自動的にエントリーされます。"
+	case rankRegistrationPromptManual:
+		return "ロール内での最高ランクを選択してください。"
+	default:
+		return "チーム分けのため、ロール内での最高ランクを選択してください。登録後、自動的にエントリーされます。"
 	}
 }
 
@@ -858,20 +934,51 @@ func (b *Bot) buildDivisionSelectComponents() []discordgo.MessageComponent {
 }
 
 func (b *Bot) savePlayerRank(userID, name, rank, div string) error {
+	rankUpdatedAt := b.nowUTC().Format(time.RFC3339)
 	if existing := b.players.GetByID(userID); existing != nil {
 		existing.Name = name
 		existing.HighestRank = model.Rank{Rank: rank, Division: div}
+		existing.RankUpdatedAt = rankUpdatedAt
 		return b.players.Save()
 	}
 
 	return b.players.Add(model.PlayerInfo{
-		ID:   userID,
-		Name: name,
+		ID:            userID,
+		Name:          name,
+		RankUpdatedAt: rankUpdatedAt,
 		HighestRank: model.Rank{
 			Rank:     rank,
 			Division: div,
 		},
 	})
+}
+
+func (b *Bot) nowUTC() time.Time {
+	if b != nil && b.now != nil {
+		return b.now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func (b *Bot) isRankRegistrationExpired(player *model.PlayerInfo) bool {
+	if player == nil || player.HighestRank.Rank == "" {
+		return false
+	}
+	if player.RankUpdatedAt == "" {
+		return true
+	}
+	registeredAt, err := time.Parse(time.RFC3339, player.RankUpdatedAt)
+	if err != nil {
+		return true
+	}
+	return !registeredAt.Add(rankRegistrationValidDuration).After(b.nowUTC())
+}
+
+func (b *Bot) rankRegistrationCompleteMessage(autoEntry bool) string {
+	if autoEntry {
+		return "✅ ランクを登録し、エントリーしました！"
+	}
+	return "✅ ランクを登録しました！"
 }
 
 func (b *Bot) ackInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) error {

@@ -25,6 +25,7 @@ type Recruitment struct {
 	ChannelID   string // チャンネルID
 	GuildID     string // サーバーID
 	IsOpen      bool   // 募集中かどうか
+	HasAssigned bool   // 振り分け結果を一度でも送信したか
 }
 
 func NewRecruitment(rankData RankDataFile) *Recruitment {

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -42,7 +43,8 @@ func (s *SQLiteStore) initSchema() error {
 			name TEXT NOT NULL,
 			main_role TEXT NOT NULL DEFAULT '',
 			highest_rank TEXT NOT NULL DEFAULT '',
-			highest_division TEXT NOT NULL DEFAULT ''
+			highest_division TEXT NOT NULL DEFAULT '',
+			rank_updated_at TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS vc_config (
 			singleton_key TEXT PRIMARY KEY,
@@ -56,24 +58,32 @@ func (s *SQLiteStore) initSchema() error {
 			return fmt.Errorf("init schema: %w", err)
 		}
 	}
+	if _, err := s.db.Exec(`ALTER TABLE players ADD COLUMN rank_updated_at TEXT NOT NULL DEFAULT ''`); err != nil {
+		// 既存DBでは既に追加済みの可能性があるため duplicate column は許容する。
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+			return fmt.Errorf("init schema alter players.rank_updated_at: %w", err)
+		}
+	}
 	return nil
 }
 
 func (s *SQLiteStore) UpsertPlayer(player PlayerInfo) error {
 	_, err := s.db.Exec(`
-		INSERT INTO players (id, name, main_role, highest_rank, highest_division)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO players (id, name, main_role, highest_rank, highest_division, rank_updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			main_role = excluded.main_role,
 			highest_rank = excluded.highest_rank,
-			highest_division = excluded.highest_division
+			highest_division = excluded.highest_division,
+			rank_updated_at = excluded.rank_updated_at
 	`,
 		player.ID,
 		player.Name,
 		player.MainRole,
 		player.HighestRank.Rank,
 		player.HighestRank.Division,
+		player.RankUpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert player %s: %w", player.ID, err)
@@ -85,11 +95,12 @@ func (s *SQLiteStore) GetPlayerByID(id string) (*PlayerInfo, error) {
 	var p PlayerInfo
 	var rank string
 	var division string
+	var rankUpdatedAt string
 	err := s.db.QueryRow(`
-		SELECT id, name, main_role, highest_rank, highest_division
+		SELECT id, name, main_role, highest_rank, highest_division, rank_updated_at
 		FROM players
 		WHERE id = ?
-	`, id).Scan(&p.ID, &p.Name, &p.MainRole, &rank, &division)
+	`, id).Scan(&p.ID, &p.Name, &p.MainRole, &rank, &division, &rankUpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -97,6 +108,7 @@ func (s *SQLiteStore) GetPlayerByID(id string) (*PlayerInfo, error) {
 		return nil, fmt.Errorf("get player %s: %w", id, err)
 	}
 	p.HighestRank = Rank{Rank: rank, Division: division}
+	p.RankUpdatedAt = rankUpdatedAt
 	return &p, nil
 }
 
@@ -110,7 +122,7 @@ func (s *SQLiteStore) PlayerCount() (int, error) {
 
 func (s *SQLiteStore) ListPlayers() ([]PlayerInfo, error) {
 	rows, err := s.db.Query(`
-		SELECT id, name, main_role, highest_rank, highest_division
+		SELECT id, name, main_role, highest_rank, highest_division, rank_updated_at
 		FROM players
 		ORDER BY id
 	`)
@@ -124,10 +136,12 @@ func (s *SQLiteStore) ListPlayers() ([]PlayerInfo, error) {
 		var p PlayerInfo
 		var rank string
 		var division string
-		if err := rows.Scan(&p.ID, &p.Name, &p.MainRole, &rank, &division); err != nil {
+		var rankUpdatedAt string
+		if err := rows.Scan(&p.ID, &p.Name, &p.MainRole, &rank, &division, &rankUpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan player row: %w", err)
 		}
 		p.HighestRank = Rank{Rank: rank, Division: division}
+		p.RankUpdatedAt = rankUpdatedAt
 		players = append(players, p)
 	}
 	if err := rows.Err(); err != nil {
