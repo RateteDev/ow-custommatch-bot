@@ -19,6 +19,7 @@ type PlayersFile struct {
 
 type PlayerDataManager struct {
 	filePath string
+	sqlite   *SQLiteStore
 	Data     PlayersFile
 }
 
@@ -30,7 +31,24 @@ func NewPlayerDataManager(filePath string) (*PlayerDataManager, error) {
 	return mgr, nil
 }
 
+func NewSQLitePlayerDataManager(store *SQLiteStore) (*PlayerDataManager, error) {
+	mgr := &PlayerDataManager{sqlite: store}
+	if err := mgr.Load(); err != nil {
+		return nil, err
+	}
+	return mgr, nil
+}
+
 func (m *PlayerDataManager) Load() error {
+	if m.sqlite != nil {
+		players, err := m.sqlite.ListPlayers()
+		if err != nil {
+			return err
+		}
+		m.Data = PlayersFile{Players: players}
+		return nil
+	}
+
 	if _, err := os.Stat(m.filePath); errors.Is(err, os.ErrNotExist) {
 		m.Data = PlayersFile{Players: []PlayerInfo{}}
 		return m.Save()
@@ -45,6 +63,15 @@ func (m *PlayerDataManager) Load() error {
 }
 
 func (m *PlayerDataManager) Save() error {
+	if m.sqlite != nil {
+		for _, p := range m.Data.Players {
+			if err := m.sqlite.UpsertPlayer(p); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	body, err := json.MarshalIndent(m.Data, "", "  ")
 	if err != nil {
 		return err
