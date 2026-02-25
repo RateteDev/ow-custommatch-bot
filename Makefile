@@ -37,4 +37,6 @@ package-win: build-win
 	cp "$(ENV_TEMPLATE_PATH)" "$(WIN_PACKAGE_DIR)/.env"
 	cp "$(WIN_GUIDE_PATH)" "$(WIN_PACKAGE_DIR)/使い方.html"
 	cp "LICENSE" "$(WIN_PACKAGE_DIR)/LICENSE"
-	cd "$(DIST_DIR)" && zip -r "$(WIN_PACKAGE_NAME).zip" "$(WIN_PACKAGE_NAME)"
+	command -v 7z >/dev/null 2>&1 || (echo "missing command: 7z" && exit 1)
+	cd "$(DIST_DIR)" && 7z a -tzip "$(WIN_PACKAGE_NAME).zip" "$(WIN_PACKAGE_NAME)"
+	rm -rf "$(WIN_PACKAGE_DIR)"
