@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +62,11 @@ func TestRequiredEnv(t *testing.T) {
 	if _, err := requiredEnv("BOT_TOKEN"); err == nil {
 		t.Fatalf("expected error when env is empty")
 	}
+
+	t.Setenv("BOT_TOKEN", "YOUR_DISCORD_BOT_TOKEN")
+	if _, err := requiredEnv("BOT_TOKEN"); err == nil {
+		t.Fatalf("expected error when BOT_TOKEN is placeholder")
+	}
 }
 
 func TestExecutableDir(t *testing.T) {
@@ -112,12 +118,15 @@ func TestCLIUsageText(t *testing.T) {
 
 func TestDescribeStartupError(t *testing.T) {
 	t.Run("missing env file", func(t *testing.T) {
-		msg := describeStartupError(filepath.Join("C:\\bot", ".env"), "BOT_TOKEN", dbFileName, os.ErrNotExist)
+		msg := describeStartupError(filepath.Join("C:\\bot", ".env"), "BOT_TOKEN", dbFileName, fmt.Errorf("open env file: %w", os.ErrNotExist))
 		if !strings.Contains(msg, ".env") {
 			t.Fatalf("expected .env hint: %s", msg)
 		}
 		if !strings.Contains(msg, "BOT_TOKEN=") {
 			t.Fatalf("expected BOT_TOKEN example: %s", msg)
+		}
+		if !strings.Contains(msg, "使い方.html") {
+			t.Fatalf("expected guide hint: %s", msg)
 		}
 	})
 
@@ -125,6 +134,25 @@ func TestDescribeStartupError(t *testing.T) {
 		msg := describeStartupError("dummy.env", "BOT_TOKEN", dbFileName, requiredEnvErr("BOT_TOKEN"))
 		if !strings.Contains(msg, "BOT_TOKEN") {
 			t.Fatalf("expected BOT_TOKEN hint: %s", msg)
+		}
+		if !strings.Contains(msg, "YOUR_DISCORD_BOT_TOKEN") {
+			t.Fatalf("expected placeholder hint: %s", msg)
+		}
+		if !strings.Contains(msg, "使い方.html") {
+			t.Fatalf("expected guide hint: %s", msg)
+		}
+	})
+
+	t.Run("invalid env format", func(t *testing.T) {
+		msg := describeStartupError("dummy.env", "BOT_TOKEN", dbFileName, fmt.Errorf("invalid env format at line 1"))
+		if !strings.Contains(msg, "書式") {
+			t.Fatalf("expected format hint: %s", msg)
+		}
+		if !strings.Contains(msg, "KEY=VALUE") {
+			t.Fatalf("expected KEY=VALUE hint: %s", msg)
+		}
+		if !strings.Contains(msg, "使い方.html") {
+			t.Fatalf("expected guide hint: %s", msg)
 		}
 	})
 }

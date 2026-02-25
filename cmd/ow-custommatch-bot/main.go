@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"io"
 	"log"
 	"os"
@@ -23,6 +24,8 @@ const (
 )
 
 var version = "dev"
+
+const botTokenPlaceholder = "YOUR_DISCORD_BOT_TOKEN"
 
 type cliOptions struct {
 	showHelp    bool
@@ -294,6 +297,9 @@ func loadEnvFile(path string) error {
 
 func requiredEnv(key string) (string, error) {
 	value := strings.TrimSpace(os.Getenv(key))
+	if key == "BOT_TOKEN" && strings.EqualFold(value, botTokenPlaceholder) {
+		return "", requiredEnvErr(key)
+	}
 	if value == "" {
 		return "", requiredEnvErr(key)
 	}
@@ -356,25 +362,47 @@ func cliUsageText(exeName string) string {
 }
 
 func describeStartupError(envPath, requiredKey, _ string, err error) string {
-	if os.IsNotExist(err) {
+	guidePath := filepath.Join(filepath.Dir(envPath), "使い方.html")
+	if errors.Is(err, fs.ErrNotExist) {
 		return fmt.Sprintf(
-			"設定ファイルが見つかりません: %s\nexe と同じフォルダに .env を配置し、例のように設定してください: %s=your-token",
+			"設定ファイルが見つかりません: %s\nexe と同じフォルダに .env を配置し、例のように設定してください: %s=%s\n詳しい手順は同じフォルダの 使い方.html をご確認ください: %s",
 			envPath,
 			requiredKey,
+			botTokenPlaceholder,
+			guidePath,
 		)
 	}
 
 	var envErr requiredEnvErr
 	if errors.As(err, &envErr) {
 		return fmt.Sprintf(
-			"必須設定 %s が未設定です。%s に `%s=your-token` を追記してください。",
+			"必須設定 %s が未設定です。%s に `%s=%s` を設定してください。\n`%s=%s` のままでも未設定扱いです。\n詳しい手順は同じフォルダの 使い方.html をご確認ください: %s",
 			string(envErr),
 			envPath,
 			string(envErr),
+			botTokenPlaceholder,
+			string(envErr),
+			botTokenPlaceholder,
+			guidePath,
 		)
 	}
 
-	return err.Error()
+	msg := err.Error()
+	if strings.Contains(msg, "invalid env format at line") || strings.Contains(msg, "empty env key at line") {
+		return fmt.Sprintf(
+			".env の書式が正しくありません（%s）。\n各行は `KEY=VALUE` 形式で記述してください（例: %s=%s）。\n詳しい手順は同じフォルダの 使い方.html をご確認ください: %s",
+			msg,
+			requiredKey,
+			botTokenPlaceholder,
+			guidePath,
+		)
+	}
+
+	return fmt.Sprintf(
+		"設定の読み込み中にエラーが発生しました（%s）。\n設定内容を確認し、詳しい手順は同じフォルダの 使い方.html をご確認ください: %s",
+		msg,
+		guidePath,
+	)
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
