@@ -22,6 +22,7 @@ make test       # ユニットテスト実行
 make build      # bin/ow-custommatch-bot をビルド
 make run        # bin/ow-custommatch-bot を実行（内部で make build 実行）
 make build-win  # Windows 向け bin/ow-custommatch-bot.exe をビルド
+make package-win # Windows 配布用 zip を生成
 ```
 
 ## ビルド出力先
@@ -35,12 +36,37 @@ make build
 make build-win
 ```
 
+## Windows 配布パッケージ（zip）
+
+Windows 向け配布用 zip は以下で生成します。
+
+```bash
+make package-win
+```
+
+生成物:
+
+- `dist/ow-custommatch-bot-win64.zip`
+
+zip の同梱内容:
+
+- `ow-custommatch-bot.exe`
+- `.env`（`.env.example` をリネームして同梱）
+- `使い方.html`
+- `LICENSE`
+
+補足:
+
+- `zip` コマンドが必要です。
+- `assets/windows/使い方.html` が存在しない場合、`make package-win` はエラー終了します。
+
 ## 実行時に必要なファイル（bin 配下）
 
 - `.env`（`BOT_TOKEN` を設定）
 - `ow-custommatch-bot.db`（初回起動時に自動生成されるため事前作成不要）
 
 `.env.example` を `bin/.env` としてコピーしてください。
+（配布用 zip では `make package-win` が `.env.example` を `.env` にリネームして同梱します）
 
 補足:
 
@@ -76,3 +102,9 @@ OW_CUSTOMMATCH_BOT_TEST_MODE=true
 ```bash
 make test
 ```
+
+## 配布素材（Windows）
+
+Windows 配布用の説明ファイルは以下に配置します。
+
+- `assets/windows/使い方.html`
