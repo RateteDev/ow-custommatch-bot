@@ -29,14 +29,14 @@ type pendingRegEntry struct {
 	channelID string
 }
 
-func New(playersPath, rankPath, vcConfigPath string) (*Bot, error) {
+func New(playersPath, vcConfigPath string) (*Bot, error) {
 	players, err := model.NewPlayerDataManager(playersPath)
 	if err != nil {
 		return nil, fmt.Errorf("load players: %w", err)
 	}
-	ranks, err := model.LoadRankData(rankPath)
+	ranks, err := model.LoadEmbeddedRankData()
 	if err != nil {
-		return nil, fmt.Errorf("load ranks: %w", err)
+		return nil, fmt.Errorf("load embedded ranks: %w", err)
 	}
 	vcConfig := model.NewVCConfigManager(vcConfigPath)
 	if err := vcConfig.Load(); err != nil {

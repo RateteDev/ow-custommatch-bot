@@ -11,14 +11,9 @@ import (
 func TestNewSuccess(t *testing.T) {
 	dir := t.TempDir()
 	playersPath := filepath.Join(dir, "players.json")
-	rankPath := filepath.Join(dir, "rank.json")
 	vcConfigPath := filepath.Join(dir, "vc_config.json")
 
-	if err := os.WriteFile(rankPath, []byte(`{"ranks":{"gold":{"1":2500}}}`), 0o644); err != nil {
-		t.Fatalf("failed to write rank data: %v", err)
-	}
-
-	b, err := New(playersPath, rankPath, vcConfigPath)
+	b, err := New(playersPath, vcConfigPath)
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -29,22 +24,18 @@ func TestNewSuccess(t *testing.T) {
 
 func TestNewErrors(t *testing.T) {
 	dir := t.TempDir()
-	rankPath := filepath.Join(dir, "rank.json")
 	vcConfigPath := filepath.Join(dir, "vc_config.json")
-	if err := os.WriteFile(rankPath, []byte(`{"ranks":{}}`), 0o644); err != nil {
-		t.Fatalf("failed to write rank data: %v", err)
-	}
 
-	if _, err := New(filepath.Join(dir, "missing", "players.json"), rankPath, vcConfigPath); err == nil {
+	if _, err := New(filepath.Join(dir, "missing", "players.json"), vcConfigPath); err == nil {
 		t.Fatalf("expected error when player file directory does not exist")
 	}
 
 	playersPath := filepath.Join(dir, "players.json")
-	if err := os.WriteFile(playersPath, []byte(`{"players":[]}`), 0o644); err != nil {
+	if err := os.WriteFile(playersPath, []byte(`{`), 0o644); err != nil {
 		t.Fatalf("failed to write players file: %v", err)
 	}
-	if _, err := New(playersPath, filepath.Join(dir, "missing-rank.json"), vcConfigPath); err == nil {
-		t.Fatalf("expected error when rank file is missing")
+	if _, err := New(playersPath, vcConfigPath); err == nil {
+		t.Fatalf("expected error when players file is invalid json")
 	}
 }
 

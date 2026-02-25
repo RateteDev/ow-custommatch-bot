@@ -23,6 +23,19 @@ func TestLoadRankData(t *testing.T) {
 	}
 }
 
+func TestLoadEmbeddedRankData(t *testing.T) {
+	r, err := LoadEmbeddedRankData()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedRankData failed: %v", err)
+	}
+	if len(r.Ranks) == 0 {
+		t.Fatalf("expected embedded rank data to be non-empty")
+	}
+	if r.Ranks["bronze"]["5"] == 0 {
+		t.Fatalf("expected embedded rank data to contain bronze rank values")
+	}
+}
+
 func TestLoadRankDataErrors(t *testing.T) {
 	if _, err := LoadRankData("does-not-exist.json"); err == nil {
 		t.Fatalf("expected error for missing rank file")
