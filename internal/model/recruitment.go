@@ -67,13 +67,10 @@ func (r *Recruitment) CalculatePlayerScore(highestRank Rank) float64 {
 }
 
 func (r *Recruitment) MakeTeams(players []ScoredPlayer) [][]ScoredPlayer {
-	if len(players) < 2 {
+	if len(players) < 10 {
 		return nil
 	}
 	target := len(players) / 5 * 5
-	if target == 0 {
-		return nil
-	}
 
 	shuffled := append([]ScoredPlayer(nil), players...)
 	rand.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })

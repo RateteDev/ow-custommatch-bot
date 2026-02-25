@@ -36,8 +36,13 @@ func TestCalculatePlayerScore(t *testing.T) {
 func TestMakeTeams(t *testing.T) {
 	r := NewRecruitment(testRankData())
 
-	if teams := r.MakeTeams([]ScoredPlayer{{ID: "1", Score: 1000}}); teams != nil {
-		t.Fatalf("expected nil when fewer than 5 players")
+	ninePlayerSlice := []ScoredPlayer{
+		{ID: "1", Score: 1000}, {ID: "2", Score: 1100}, {ID: "3", Score: 1200},
+		{ID: "4", Score: 1300}, {ID: "5", Score: 1400}, {ID: "6", Score: 1500},
+		{ID: "7", Score: 1600}, {ID: "8", Score: 1700}, {ID: "9", Score: 1800},
+	}
+	if teams := r.MakeTeams(ninePlayerSlice); teams != nil {
+		t.Fatalf("expected nil for 9 players (< 10)")
 	}
 
 	players := []ScoredPlayer{
@@ -61,7 +66,6 @@ func TestMakeTeams(t *testing.T) {
 			seen[p.ID] = true
 		}
 	}
-
 	if len(seen) != 10 {
 		t.Fatalf("expected all players to be assigned once, got %d", len(seen))
 	}
