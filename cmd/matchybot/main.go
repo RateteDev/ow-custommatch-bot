@@ -17,6 +17,7 @@ const (
 	envFileName        = ".env"
 	playerDataFileName = "player_data.json"
 	rankDataFileName   = "rank.json"
+	vcConfigFileName   = "vc_config.json"
 )
 
 func executableDir() (string, error) {
@@ -111,8 +112,9 @@ func main() {
 
 	playerDataPath := filepath.Join(exeDir, playerDataFileName)
 	rankDataPath := filepath.Join(exeDir, rankDataFileName)
+	vcConfigPath := filepath.Join(exeDir, vcConfigFileName)
 
-	b, err := bot.New(playerDataPath, rankDataPath)
+	b, err := bot.New(playerDataPath, rankDataPath, vcConfigPath)
 	if err != nil {
 		log.Fatalf("failed to initialize bot: %v", err)
 	}

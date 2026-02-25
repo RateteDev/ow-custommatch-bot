@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/RateteDev/MatchyBot/internal/model"
@@ -17,6 +18,7 @@ type Bot struct {
 	session              *discordgo.Session
 	players              *model.PlayerDataManager
 	rankData             model.RankDataFile
+	vcConfig             *model.VCConfigManager
 	recruitments         map[string]*model.Recruitment
 	pendingRegistrations map[string]pendingRegEntry
 	testDummies          map[string]map[string]model.PlayerInfo
@@ -27,7 +29,7 @@ type pendingRegEntry struct {
 	channelID string
 }
 
-func New(playersPath, rankPath string) (*Bot, error) {
+func New(playersPath, rankPath, vcConfigPath string) (*Bot, error) {
 	players, err := model.NewPlayerDataManager(playersPath)
 	if err != nil {
 		return nil, fmt.Errorf("load players: %w", err)
@@ -36,10 +38,15 @@ func New(playersPath, rankPath string) (*Bot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load ranks: %w", err)
 	}
+	vcConfig := model.NewVCConfigManager(vcConfigPath)
+	if err := vcConfig.Load(); err != nil {
+		return nil, fmt.Errorf("load vc config: %w", err)
+	}
 
 	return &Bot{
 		players:              players,
 		rankData:             ranks,
+		vcConfig:             vcConfig,
 		recruitments:         make(map[string]*model.Recruitment),
 		pendingRegistrations: make(map[string]pendingRegEntry),
 		testDummies:          make(map[string]map[string]model.PlayerInfo),
@@ -142,6 +149,7 @@ func (b *Bot) handleMatchStart(s *discordgo.Session, i *discordgo.InteractionCre
 	r := model.NewRecruitment(b.rankData)
 	r.OrganizerID = userID
 	r.ChannelID = channelID
+	r.GuildID = i.GuildID
 	r.IsOpen = true
 	b.recruitments[channelID] = r
 	b.testDummies[channelID] = make(map[string]model.PlayerInfo)
@@ -433,6 +441,53 @@ func (b *Bot) handleAssign(s *discordgo.Session, i *discordgo.InteractionCreate)
 	if testModeResult {
 		embed.Footer = &discordgo.MessageEmbedFooter{Text: "テストモード"}
 	}
+
+	vcChannelIDs, err := b.ensureVCChannels(s, r.GuildID, len(teams))
+	if err != nil {
+		log.Printf("failed to ensure vc channels: %v", err)
+		if err := b.respondEphemeralText(s, i, "VCチャンネルの準備に失敗しました"); err != nil {
+			log.Printf("failed to respond vc setup error: %v", err)
+		}
+		return
+	}
+
+	type inviteResult struct {
+		idx int
+		url string
+		err error
+	}
+	results := make(chan inviteResult, len(vcChannelIDs))
+	var wg sync.WaitGroup
+	for idx, chID := range vcChannelIDs {
+		wg.Add(1)
+		go func(idx int, chID string) {
+			defer wg.Done()
+			inv, err := s.ChannelInviteCreate(chID, discordgo.Invite{
+				MaxAge:  86400,
+				MaxUses: 0,
+				Unique:  true,
+			})
+			if err != nil {
+				results <- inviteResult{idx: idx, err: err}
+				return
+			}
+			results <- inviteResult{idx: idx, url: "https://discord.gg/" + inv.Code}
+		}(idx, chID)
+	}
+	wg.Wait()
+	close(results)
+
+	for res := range results {
+		if res.err != nil {
+			log.Printf("failed to create vc invite for team %s: %v", teamLabel(res.idx), res.err)
+			if err := b.respondEphemeralText(s, i, "VC招待リンクの作成に失敗しました"); err != nil {
+				log.Printf("failed to respond vc invite error: %v", err)
+			}
+			return
+		}
+		fields[res.idx].Value += "\n[📢 VCに参加](" + res.url + ")"
+	}
+
 	if _, err := s.ChannelMessageSendEmbed(i.ChannelID, embed); err != nil {
 		log.Printf("failed to post team assignments: %v", err)
 	}
@@ -440,6 +495,111 @@ func (b *Bot) handleAssign(s *discordgo.Session, i *discordgo.InteractionCreate)
 	if err := b.ackInteraction(s, i); err != nil {
 		log.Printf("failed to ack assign interaction: %v", err)
 	}
+}
+
+func (b *Bot) ensureVCChannels(s *discordgo.Session, guildID string, teamCount int) ([]string, error) {
+	if guildID == "" {
+		return nil, fmt.Errorf("guild id is empty")
+	}
+	if teamCount <= 0 {
+		return []string{}, nil
+	}
+	if b.vcConfig == nil {
+		return nil, fmt.Errorf("vc config manager is nil")
+	}
+	if b.vcConfig.Data.VCChannelIDs == nil {
+		b.vcConfig.Data.VCChannelIDs = []string{}
+	}
+
+	categoryID := b.vcConfig.Data.CategoryID
+	categoryMissing := categoryID == ""
+	if !categoryMissing {
+		ch, err := s.Channel(categoryID)
+		if err != nil {
+			if isDiscord404(err) {
+				categoryMissing = true
+			} else {
+				return nil, fmt.Errorf("get category channel: %w", err)
+			}
+		} else if ch == nil || ch.Type != discordgo.ChannelTypeGuildCategory {
+			categoryMissing = true
+		}
+	}
+	if categoryMissing {
+		ch, err := s.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{
+			Name: "MatchyBot",
+			Type: discordgo.ChannelTypeGuildCategory,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create category channel: %w", err)
+		}
+		b.vcConfig.Data.CategoryID = ch.ID
+	}
+
+	for idx := range b.vcConfig.Data.VCChannelIDs {
+		chID := b.vcConfig.Data.VCChannelIDs[idx]
+		if chID == "" {
+			ch, err := s.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{
+				Name:     "チーム" + teamLabel(idx),
+				Type:     discordgo.ChannelTypeGuildVoice,
+				ParentID: b.vcConfig.Data.CategoryID,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("create vc channel %d: %w", idx, err)
+			}
+			b.vcConfig.Data.VCChannelIDs[idx] = ch.ID
+			continue
+		}
+
+		ch, err := s.Channel(chID)
+		if err != nil {
+			if !isDiscord404(err) {
+				return nil, fmt.Errorf("get vc channel %s: %w", chID, err)
+			}
+			ch, err = s.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{
+				Name:     "チーム" + teamLabel(idx),
+				Type:     discordgo.ChannelTypeGuildVoice,
+				ParentID: b.vcConfig.Data.CategoryID,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("recreate vc channel %d: %w", idx, err)
+			}
+			b.vcConfig.Data.VCChannelIDs[idx] = ch.ID
+			continue
+		}
+
+		if ch == nil || ch.Type != discordgo.ChannelTypeGuildVoice {
+			created, err := s.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{
+				Name:     "チーム" + teamLabel(idx),
+				Type:     discordgo.ChannelTypeGuildVoice,
+				ParentID: b.vcConfig.Data.CategoryID,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("replace vc channel %d: %w", idx, err)
+			}
+			b.vcConfig.Data.VCChannelIDs[idx] = created.ID
+			continue
+		}
+	}
+
+	for len(b.vcConfig.Data.VCChannelIDs) < teamCount {
+		idx := len(b.vcConfig.Data.VCChannelIDs)
+		ch, err := s.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{
+			Name:     "チーム" + teamLabel(idx),
+			Type:     discordgo.ChannelTypeGuildVoice,
+			ParentID: b.vcConfig.Data.CategoryID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create vc channel %d: %w", idx, err)
+		}
+		b.vcConfig.Data.VCChannelIDs = append(b.vcConfig.Data.VCChannelIDs, ch.ID)
+	}
+
+	if err := b.vcConfig.Save(); err != nil {
+		return nil, fmt.Errorf("save vc config: %w", err)
+	}
+
+	return append([]string(nil), b.vcConfig.Data.VCChannelIDs[:teamCount]...), nil
 }
 
 func (b *Bot) handleCancel(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -491,7 +651,7 @@ func (b *Bot) updateClosedEmbed(s *discordgo.Session, r *model.Recruitment, titl
 	}
 
 	embed := buildRecruitEmbed(r, title, 0xE74C3C)
-	components := b.buildRecruitComponents(true)
+	components := []discordgo.MessageComponent{}
 	edit := discordgo.NewMessageEdit(r.ChannelID, r.MessageID)
 	edit.Embeds = &[]*discordgo.MessageEmbed{embed}
 	edit.Components = &components
@@ -717,6 +877,13 @@ func interactionUser(i *discordgo.InteractionCreate) (id string, name string) {
 		return u.ID, display
 	}
 	return "", "unknown"
+}
+
+func isDiscord404(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "404")
 }
 
 func teamLabel(idx int) string {

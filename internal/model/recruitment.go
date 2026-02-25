@@ -23,6 +23,7 @@ type Recruitment struct {
 	OrganizerID string // 発案者の Discord UserID
 	MessageID   string // Discord メッセージID（Embed 更新用）
 	ChannelID   string // チャンネルID
+	GuildID     string // サーバーID
 	IsOpen      bool   // 募集中かどうか
 }
 
