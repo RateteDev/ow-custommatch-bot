@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,4 +127,39 @@ func TestDescribeStartupError(t *testing.T) {
 			t.Fatalf("expected BOT_TOKEN hint: %s", msg)
 		}
 	})
+}
+
+func TestDetectColorEnabled(t *testing.T) {
+	if detectColorEnabled(&bytes.Buffer{}) {
+		t.Fatalf("expected color to be disabled for non-file writer")
+	}
+}
+
+func TestStyleConsoleLogLine(t *testing.T) {
+	line := "2026/02/25 20:00:00 [INFO] [2/4] 設定ファイル読込 ... OK\n"
+	styled := styleConsoleLogLine(line, ansiStyle{enabled: true})
+	if !strings.Contains(styled, "\x1b[") {
+		t.Fatalf("expected ANSI escape sequence in styled line: %q", styled)
+	}
+
+	plain := styleConsoleLogLine(line, ansiStyle{enabled: false})
+	if plain != line {
+		t.Fatalf("expected plain line unchanged")
+	}
+}
+
+func TestIsProgressToken(t *testing.T) {
+	for _, tc := range []struct {
+		token string
+		want  bool
+	}{
+		{token: "[2/4]", want: true},
+		{token: "[INFO]", want: false},
+		{token: "[2m", want: false},
+		{token: "[abc/4]", want: false},
+	} {
+		if got := isProgressToken(tc.token); got != tc.want {
+			t.Fatalf("isProgressToken(%q) = %v, want %v", tc.token, got, tc.want)
+		}
+	}
 }

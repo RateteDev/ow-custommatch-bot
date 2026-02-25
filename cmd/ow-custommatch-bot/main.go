@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +33,218 @@ type requiredEnvErr string
 
 func (e requiredEnvErr) Error() string {
 	return fmt.Sprintf("%s is required", string(e))
+}
+
+type ansiStyle struct {
+	enabled bool
+}
+
+func (a ansiStyle) paint(code, s string) string {
+	if !a.enabled || s == "" {
+		return s
+	}
+	return "\x1b[" + code + "m" + s + "\x1b[0m"
+}
+
+func (a ansiStyle) bold(s string) string      { return a.paint("1", s) }
+func (a ansiStyle) dim(s string) string       { return a.paint("2", s) }
+func (a ansiStyle) cyan(s string) string      { return a.paint("36", s) }
+func (a ansiStyle) blue(s string) string      { return a.paint("34", s) }
+func (a ansiStyle) green(s string) string     { return a.paint("32", s) }
+func (a ansiStyle) yellow(s string) string    { return a.paint("33", s) }
+func (a ansiStyle) red(s string) string       { return a.paint("31", s) }
+func (a ansiStyle) magenta(s string) string   { return a.paint("35", s) }
+func (a ansiStyle) whiteOnBlue(s string) string { return a.paint("37;44", s) }
+
+type startupUI struct {
+	out   io.Writer
+	err   io.Writer
+	style ansiStyle
+}
+
+func newStartupUI(out, err io.Writer) startupUI {
+	return startupUI{
+		out:   out,
+		err:   err,
+		style: ansiStyle{enabled: detectColorEnabled(out)},
+	}
+}
+
+func (ui startupUI) printBanner(ver string) {
+	fmt.Fprintln(ui.out)
+	fmt.Fprintln(ui.out, ui.style.magenta("+- OW CUSTOMMATCH BOT --------------------------------------+"))
+	fmt.Fprintf(ui.out, "%s %s\n", ui.style.bold("  Overwatch Custom Match Assistant"), ui.style.dim("v"+ver))
+	fmt.Fprintln(ui.out, ui.style.magenta("+-----------------------------------------------------------+"))
+	fmt.Fprintln(ui.out)
+}
+
+func (ui startupUI) printPaths(exeDir, logPath, dbPath string) {
+	label := func(name string) string {
+		return ui.style.cyan(fmt.Sprintf("%-4s", name))
+	}
+	fmt.Fprintf(ui.out, "%s %s\n", label("exe"), exeDir)
+	fmt.Fprintf(ui.out, "%s %s\n", label("log"), logPath)
+	fmt.Fprintf(ui.out, "%s %s\n", label("db"), dbPath)
+	fmt.Fprintln(ui.out)
+}
+
+func (ui startupUI) stepStart(i, total int, title string) {
+	fmt.Fprintf(
+		ui.out,
+		"%s %s %-28s %s\n",
+		ui.style.blue(fmt.Sprintf("[%d/%d]", i, total)),
+		ui.style.dim(">"),
+		title,
+		ui.style.dim("START"),
+	)
+}
+
+func (ui startupUI) stepOK(i, total int, title string) {
+	fmt.Fprintf(
+		ui.out,
+		"%s %s %-28s %s\n",
+		ui.style.blue(fmt.Sprintf("[%d/%d]", i, total)),
+		ui.style.dim(">"),
+		title,
+		ui.style.green("OK"),
+	)
+}
+
+func (ui startupUI) stepFail(i, total int, title string) {
+	fmt.Fprintf(
+		ui.out,
+		"%s %s %-28s %s\n",
+		ui.style.blue(fmt.Sprintf("[%d/%d]", i, total)),
+		ui.style.dim(">"),
+		title,
+		ui.style.red("FAIL"),
+	)
+}
+
+func (ui startupUI) ready() {
+	fmt.Fprintln(ui.out)
+	fmt.Fprintf(ui.out, "%s Discord接続を開始します。終了するには %s を押してください。\n\n",
+		ui.style.green("READY"),
+		ui.style.bold("Ctrl+C"),
+	)
+}
+
+func (ui startupUI) printErrorLine(msg string) {
+	fmt.Fprintf(ui.err, "%s %s\n", ui.style.red("ERROR"), msg)
+}
+
+type consoleLogWriter struct {
+	out   io.Writer
+	style ansiStyle
+}
+
+func (w *consoleLogWriter) Write(p []byte) (int, error) {
+	s := string(p)
+	if !w.style.enabled {
+		_, err := io.WriteString(w.out, s)
+		return len(p), err
+	}
+
+	var b strings.Builder
+	for _, part := range strings.SplitAfter(s, "\n") {
+		if part == "" {
+			continue
+		}
+		b.WriteString(styleConsoleLogLine(part, w.style))
+	}
+	_, err := io.WriteString(w.out, b.String())
+	return len(p), err
+}
+
+func styleConsoleLogLine(line string, style ansiStyle) string {
+	if !style.enabled {
+		return line
+	}
+
+	hasNL := strings.HasSuffix(line, "\n")
+	body := strings.TrimSuffix(line, "\n")
+
+	if i := strings.Index(body, " "); i > 0 && looksLikeLogTimestamp(body[:i]) {
+		body = style.dim(body[:i]) + body[i:]
+	}
+
+	body = strings.ReplaceAll(body, "[INFO]", style.blue("[INFO]"))
+	body = strings.ReplaceAll(body, "[WARN]", style.yellow("[WARN]"))
+	body = strings.ReplaceAll(body, "[ERROR]", style.red("[ERROR]"))
+	body = strings.ReplaceAll(body, "... OK", "... "+style.green("OK"))
+	body = strings.ReplaceAll(body, "... 開始", "... "+style.yellow("開始"))
+	body = strings.ReplaceAll(body, "Ctrl+C", style.bold("Ctrl+C"))
+
+	body = colorizeProgressToken(body, style)
+	body = strings.ReplaceAll(body, "Logged in as", style.green("Logged in as"))
+	body = strings.ReplaceAll(body, "is running with", style.cyan("is running with"))
+
+	if hasNL {
+		return body + "\n"
+	}
+	return body
+}
+
+func colorizeProgressToken(s string, style ansiStyle) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '[' {
+			continue
+		}
+		endRel := strings.IndexByte(s[i:], ']')
+		if endRel <= 0 {
+			continue
+		}
+		end := i + endRel
+		token := s[i : end+1]
+		if !isProgressToken(token) {
+			continue
+		}
+		return s[:i] + style.cyan(token) + s[end+1:]
+	}
+	return s
+}
+
+func isProgressToken(token string) bool {
+	if len(token) < 5 || token[0] != '[' || token[len(token)-1] != ']' {
+		return false
+	}
+	body := token[1 : len(token)-1]
+	left, right, ok := strings.Cut(body, "/")
+	if !ok || left == "" || right == "" {
+		return false
+	}
+	if _, err := strconv.Atoi(left); err != nil {
+		return false
+	}
+	if _, err := strconv.Atoi(right); err != nil {
+		return false
+	}
+	return true
+}
+
+func looksLikeLogTimestamp(s string) bool {
+	if len(s) != len("2006/01/02") {
+		return false
+	}
+	return s[4] == '/' && s[7] == '/'
+}
+
+func detectColorEnabled(w io.Writer) bool {
+	if strings.TrimSpace(os.Getenv("NO_COLOR")) != "" {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb") {
+		return false
+	}
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
 func executableDir() (string, error) {
@@ -87,7 +300,7 @@ func requiredEnv(key string) (string, error) {
 	return value, nil
 }
 
-func setupLogger(exeDir string, consoleOut io.Writer) (io.Closer, string, error) {
+func setupLogger(exeDir string) (*os.File, string, error) {
 	logDir := filepath.Join(exeDir, ".logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return nil, "", fmt.Errorf("create log dir: %w", err)
@@ -99,8 +312,15 @@ func setupLogger(exeDir string, consoleOut io.Writer) (io.Closer, string, error)
 		return nil, "", fmt.Errorf("open log file: %w", err)
 	}
 
-	log.SetOutput(io.MultiWriter(consoleOut, f))
+	log.SetOutput(f)
 	return f, logPath, nil
+}
+
+func enableConsoleLogging(logFile *os.File, consoleOut io.Writer, color bool) {
+	log.SetOutput(io.MultiWriter(&consoleLogWriter{
+		out:   consoleOut,
+		style: ansiStyle{enabled: color},
+	}, logFile))
 }
 
 func parseCLIArgs(args []string) (cliOptions, error) {
@@ -158,9 +378,12 @@ func describeStartupError(envPath, requiredKey, _ string, err error) string {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	ui := newStartupUI(stdout, stderr)
+
 	opts, err := parseCLIArgs(args)
 	if err != nil {
-		fmt.Fprintf(stderr, "引数エラー: %v\n\n%s", err, cliUsageText(appName))
+		ui.printErrorLine(fmt.Sprintf("引数エラー: %v", err))
+		fmt.Fprint(stderr, "\n"+cliUsageText(appName))
 		return 2
 	}
 	if opts.showHelp {
@@ -174,16 +397,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	exeDir, err := executableDir()
 	if err != nil {
-		fmt.Fprintf(stderr, "起動に失敗しました: 実行ディレクトリを取得できませんでした: %v\n", err)
+		ui.printErrorLine(fmt.Sprintf("起動に失敗しました: 実行ディレクトリを取得できませんでした: %v", err))
 		return 1
 	}
 
-	closer, logPath, err := setupLogger(exeDir, stdout)
+	logFile, logPath, err := setupLogger(exeDir)
 	if err != nil {
-		fmt.Fprintf(stderr, "起動に失敗しました: ログを初期化できませんでした: %v\n", err)
+		ui.printErrorLine(fmt.Sprintf("起動に失敗しました: ログを初期化できませんでした: %v", err))
 		return 1
 	}
-	defer closer.Close()
+	defer logFile.Close()
+
+	dbPath := filepath.Join(exeDir, dbFileName)
+	ui.printBanner(version)
+	ui.printPaths(exeDir, logPath, dbPath)
+	ui.stepOK(1, 4, "ログ初期化")
 
 	log.Printf("[INFO] %s %s", appName, version)
 	log.Printf("[INFO] 実行ディレクトリ: %s", exeDir)
@@ -193,36 +421,43 @@ func run(args []string, stdout, stderr io.Writer) int {
 	envPath := filepath.Join(exeDir, envFileName)
 	log.Printf("[INFO] [2/4] 設定ファイル読込 (%s) ... 開始", envPath)
 	if err := loadEnvFile(envPath); err != nil {
+		ui.stepFail(2, 4, "設定ファイル読込")
 		log.Printf("[ERROR] 設定ファイル読込に失敗: %v", err)
-		fmt.Fprintf(stderr, "起動に失敗しました: %s\n", describeStartupError(envPath, "BOT_TOKEN", dbFileName, err))
+		ui.printErrorLine("起動に失敗しました: " + describeStartupError(envPath, "BOT_TOKEN", dbFileName, err))
 		return 1
 	}
+	ui.stepOK(2, 4, "設定ファイル読込")
 	log.Printf("[INFO] [2/4] 設定ファイル読込 ... OK")
 
 	log.Printf("[INFO] [3/4] 必須設定チェック ... 開始")
 	botToken, err := requiredEnv("BOT_TOKEN")
 	if err != nil {
+		ui.stepFail(3, 4, "必須設定チェック")
 		log.Printf("[ERROR] 必須設定チェックに失敗: %v", err)
-		fmt.Fprintf(stderr, "起動に失敗しました: %s\n", describeStartupError(envPath, "BOT_TOKEN", dbFileName, err))
+		ui.printErrorLine("起動に失敗しました: " + describeStartupError(envPath, "BOT_TOKEN", dbFileName, err))
 		return 1
 	}
+	ui.stepOK(3, 4, "必須設定チェック")
 	log.Printf("[INFO] [3/4] 必須設定チェック ... OK")
 
-	dbPath := filepath.Join(exeDir, dbFileName)
 	log.Printf("[INFO] [4/4] Bot初期化 (DB: %s) ... 開始", dbPath)
 
 	b, err := bot.New(dbPath)
 	if err != nil {
+		ui.stepFail(4, 4, "Bot初期化")
 		log.Printf("[ERROR] Bot初期化に失敗: %v", err)
-		fmt.Fprintf(stderr, "起動に失敗しました: Bot初期化に失敗しました（DB: %s）: %v\n", dbPath, err)
+		ui.printErrorLine(fmt.Sprintf("起動に失敗しました: Bot初期化に失敗しました（DB: %s）: %v", dbPath, err))
 		return 1
 	}
+	ui.stepOK(4, 4, "Bot初期化")
 	log.Printf("[INFO] [4/4] Bot初期化 ... OK")
+	ui.ready()
 	log.Printf("[INFO] Discord接続を開始します。終了するには Ctrl+C を押してください。")
+	enableConsoleLogging(logFile, stdout, ui.style.enabled)
 
 	if err := b.Run(botToken); err != nil {
 		log.Printf("[ERROR] Bot実行エラー: %v", err)
-		fmt.Fprintf(stderr, "実行中にエラーが発生しました: %v\n", err)
+		ui.printErrorLine(fmt.Sprintf("実行中にエラーが発生しました: %v", err))
 		return 1
 	}
 
