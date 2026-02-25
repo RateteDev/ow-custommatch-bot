@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,8 @@ const (
 )
 
 var version = "dev"
+var runtimeGOOS = runtime.GOOS
+var hasInteractiveConsole = detectInteractiveConsole
 
 const botTokenPlaceholder = "YOUR_DISCORD_BOT_TOKEN"
 
@@ -133,7 +136,31 @@ func (ui startupUI) ready() {
 }
 
 func (ui startupUI) printErrorLine(msg string) {
-	fmt.Fprintf(ui.err, "%s %s\n", ui.style.red("ERROR"), msg)
+	fmt.Fprintf(ui.err, "%s %s\n", ui.style.red("ERROR"), formatErrorMessageText(msg))
+}
+
+func formatErrorMessageText(msg string) string {
+	rs := []rune(msg)
+	if len(rs) == 0 {
+		return msg
+	}
+
+	var b strings.Builder
+	b.Grow(len(msg) + 16)
+	for i, r := range rs {
+		b.WriteRune(r)
+		if r != '。' && r != '、' {
+			continue
+		}
+		if i+1 >= len(rs) {
+			continue
+		}
+		if rs[i+1] == '\n' {
+			continue
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 type consoleLogWriter struct {
@@ -248,6 +275,47 @@ func detectColorEnabled(w io.Writer) bool {
 		return false
 	}
 	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+func detectInteractiveConsole(stdin io.Reader, stdout io.Writer) bool {
+	inFile, ok := stdin.(*os.File)
+	if !ok {
+		return false
+	}
+	outFile, ok := stdout.(*os.File)
+	if !ok {
+		return false
+	}
+
+	inInfo, err := inFile.Stat()
+	if err != nil {
+		return false
+	}
+	outInfo, err := outFile.Stat()
+	if err != nil {
+		return false
+	}
+
+	return (inInfo.Mode()&os.ModeCharDevice) != 0 && (outInfo.Mode()&os.ModeCharDevice) != 0
+}
+
+func shouldPauseOnErrorExit(code int, stdin io.Reader, stdout io.Writer) bool {
+	if code == 0 {
+		return false
+	}
+	if runtimeGOOS != "windows" {
+		return false
+	}
+	return hasInteractiveConsole(stdin, stdout)
+}
+
+func pauseOnErrorExit(code int, stdin io.Reader, stdout io.Writer) {
+	if !shouldPauseOnErrorExit(code, stdin, stdout) {
+		return
+	}
+
+	fmt.Fprint(stdout, "\nエラー終了しました。Enterキーを押すとウィンドウを閉じます...")
+	_, _ = bufio.NewReader(stdin).ReadString('\n')
 }
 
 func executableDir() (string, error) {
@@ -494,5 +562,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	code := run(os.Args[1:], os.Stdout, os.Stderr)
+	pauseOnErrorExit(code, os.Stdin, os.Stdout)
+	os.Exit(code)
 }

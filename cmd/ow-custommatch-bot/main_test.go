@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -176,6 +177,38 @@ func TestStyleConsoleLogLine(t *testing.T) {
 	}
 }
 
+func TestFormatErrorMessageText(t *testing.T) {
+	msg := "起動に失敗しました: 必須設定 BOT_TOKEN が未設定です。dummy.env に設定してください。`BOT_TOKEN=YOUR_DISCORD_BOT_TOKEN` のままでも未設定扱いです。\n詳しい手順は同じフォルダの 使い方.html をご確認ください。"
+	got := formatErrorMessageText(msg)
+
+	wants := []string{
+		"未設定です。\n",
+		"設定してください。\n",
+		"未設定扱いです。\n",
+		"ご確認ください。",
+	}
+	for _, want := range wants {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatted message missing %q: %q", want, got)
+		}
+	}
+	if strings.Contains(got, "\n\n") {
+		t.Fatalf("formatted message should not contain double newlines: %q", got)
+	}
+}
+
+func TestStartupUIPrintErrorLineFormatsMessage(t *testing.T) {
+	var errOut bytes.Buffer
+	ui := newStartupUI(&bytes.Buffer{}, &errOut)
+
+	ui.printErrorLine("Aです。Bです。")
+
+	got := errOut.String()
+	if !strings.Contains(got, "Aです。\nBです。") {
+		t.Fatalf("unexpected error output: %q", got)
+	}
+}
+
 func TestIsProgressToken(t *testing.T) {
 	for _, tc := range []struct {
 		token string
@@ -189,5 +222,57 @@ func TestIsProgressToken(t *testing.T) {
 		if got := isProgressToken(tc.token); got != tc.want {
 			t.Fatalf("isProgressToken(%q) = %v, want %v", tc.token, got, tc.want)
 		}
+	}
+}
+
+func TestShouldPauseOnErrorExit(t *testing.T) {
+	origGOOS := runtimeGOOS
+	origConsole := hasInteractiveConsole
+	t.Cleanup(func() {
+		runtimeGOOS = origGOOS
+		hasInteractiveConsole = origConsole
+	})
+
+	runtimeGOOS = "windows"
+	hasInteractiveConsole = func(stdin io.Reader, stdout io.Writer) bool {
+		return true
+	}
+
+	if !shouldPauseOnErrorExit(1, bytes.NewBuffer(nil), &bytes.Buffer{}) {
+		t.Fatalf("expected pause on windows error exit with interactive console")
+	}
+	if shouldPauseOnErrorExit(0, bytes.NewBuffer(nil), &bytes.Buffer{}) {
+		t.Fatalf("did not expect pause on success exit")
+	}
+
+	runtimeGOOS = "linux"
+	if shouldPauseOnErrorExit(1, bytes.NewBuffer(nil), &bytes.Buffer{}) {
+		t.Fatalf("did not expect pause on non-windows")
+	}
+}
+
+func TestPauseOnErrorExit(t *testing.T) {
+	origGOOS := runtimeGOOS
+	origConsole := hasInteractiveConsole
+	t.Cleanup(func() {
+		runtimeGOOS = origGOOS
+		hasInteractiveConsole = origConsole
+	})
+
+	runtimeGOOS = "windows"
+	hasInteractiveConsole = func(stdin io.Reader, stdout io.Writer) bool {
+		return true
+	}
+
+	var out bytes.Buffer
+	pauseOnErrorExit(1, bytes.NewBufferString("\n"), &out)
+	if !strings.Contains(out.String(), "Enterキー") {
+		t.Fatalf("expected pause message, got: %q", out.String())
+	}
+
+	out.Reset()
+	pauseOnErrorExit(0, bytes.NewBufferString("\n"), &out)
+	if out.Len() != 0 {
+		t.Fatalf("did not expect output on success exit: %q", out.String())
 	}
 }
