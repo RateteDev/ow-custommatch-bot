@@ -82,17 +82,6 @@ Discord で手動テスト項目を実施する。
 
 ---
 
-## ビルド・テストコマンド
-
-```bash
-go test ./...                              # 全パッケージのユニットテスト
-go build ./...                             # 全パッケージのビルド確認
-go build -o bin/ow-custommatch-bot ./cmd/ow-custommatch-bot/ # 実行バイナリのビルド
-./bin/ow-custommatch-bot                            # Bot 起動
-```
-
----
-
 ## プランファイルの命名規則
 
 ```
@@ -101,14 +90,3 @@ docs/plans/<3桁連番>-<ランダム英単語3つ>.md
 ```
 
 完了後は `docs/plans/fixed/` に移動し、実装結果・次期改善事項を追記する。
-
----
-
-## 注意事項
-
-- **インタラクション応答制限（3秒）**: Discord API はボタン押下から 3 秒以内に応答を返さないとエラーになる。
-  重い処理（API 呼び出し・並列処理）の前に `InteractionResponseDeferredMessageUpdate` で先に応答を返すこと。
-- **`bin/` 配下のデータファイル**: `player_data.json` / `rank.json` / `vc_config.json` は `.gitignore` 対象。
-  `bin/.gitkeep` のみコミット対象。
-- **テスト対象外**: discordgo の API 呼び出しを含む関数はユニットテスト不可。
-  `internal/model/` のロジック層（`MakeTeams`・`Load`/`Save` 等）をテスト対象とする。
