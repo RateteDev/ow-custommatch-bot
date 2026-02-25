@@ -29,18 +29,23 @@ type pendingRegEntry struct {
 	channelID string
 }
 
-func New(playersPath, vcConfigPath string) (*Bot, error) {
-	players, err := model.NewPlayerDataManager(playersPath)
+func New(dbPath string) (*Bot, error) {
+	store, err := model.NewSQLiteStore(dbPath)
 	if err != nil {
-		return nil, fmt.Errorf("load players: %w", err)
+		return nil, fmt.Errorf("open sqlite store: %w", err)
+	}
+
+	players, err := model.NewSQLitePlayerDataManager(store)
+	if err != nil {
+		return nil, fmt.Errorf("load sqlite players: %w", err)
 	}
 	ranks, err := model.LoadEmbeddedRankData()
 	if err != nil {
 		return nil, fmt.Errorf("load embedded ranks: %w", err)
 	}
-	vcConfig := model.NewVCConfigManager(vcConfigPath)
+	vcConfig := model.NewSQLiteVCConfigManager(store)
 	if err := vcConfig.Load(); err != nil {
-		return nil, fmt.Errorf("load vc config: %w", err)
+		return nil, fmt.Errorf("load sqlite vc config: %w", err)
 	}
 
 	return &Bot{

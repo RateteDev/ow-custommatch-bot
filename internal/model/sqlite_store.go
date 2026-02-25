@@ -108,6 +108,34 @@ func (s *SQLiteStore) PlayerCount() (int, error) {
 	return n, nil
 }
 
+func (s *SQLiteStore) ListPlayers() ([]PlayerInfo, error) {
+	rows, err := s.db.Query(`
+		SELECT id, name, main_role, highest_rank, highest_division
+		FROM players
+		ORDER BY id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list players: %w", err)
+	}
+	defer rows.Close()
+
+	players := []PlayerInfo{}
+	for rows.Next() {
+		var p PlayerInfo
+		var rank string
+		var division string
+		if err := rows.Scan(&p.ID, &p.Name, &p.MainRole, &rank, &division); err != nil {
+			return nil, fmt.Errorf("scan player row: %w", err)
+		}
+		p.HighestRank = Rank{Rank: rank, Division: division}
+		players = append(players, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate players: %w", err)
+	}
+	return players, nil
+}
+
 func (s *SQLiteStore) LoadVCConfig() (VCConfig, error) {
 	var cfg VCConfig
 	var idsJSON string
@@ -130,6 +158,18 @@ func (s *SQLiteStore) LoadVCConfig() (VCConfig, error) {
 		cfg.VCChannelIDs = []string{}
 	}
 	return cfg, nil
+}
+
+func (s *SQLiteStore) HasVCConfig() (bool, error) {
+	var n int
+	if err := s.db.QueryRow(`
+		SELECT COUNT(*)
+		FROM vc_config
+		WHERE singleton_key = ?
+	`, vcConfigSingletonKey).Scan(&n); err != nil {
+		return false, fmt.Errorf("check vc config row: %w", err)
+	}
+	return n > 0, nil
 }
 
 func (s *SQLiteStore) SaveVCConfig(cfg VCConfig) error {

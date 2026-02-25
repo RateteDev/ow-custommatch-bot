@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -10,10 +9,9 @@ import (
 
 func TestNewSuccess(t *testing.T) {
 	dir := t.TempDir()
-	playersPath := filepath.Join(dir, "players.json")
-	vcConfigPath := filepath.Join(dir, "vc_config.json")
+	dbPath := filepath.Join(dir, "matchybot.db")
 
-	b, err := New(playersPath, vcConfigPath)
+	b, err := New(dbPath)
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -24,18 +22,10 @@ func TestNewSuccess(t *testing.T) {
 
 func TestNewErrors(t *testing.T) {
 	dir := t.TempDir()
-	vcConfigPath := filepath.Join(dir, "vc_config.json")
+	dbPath := filepath.Join(dir, "nested", "matchybot.db")
 
-	if _, err := New(filepath.Join(dir, "missing", "players.json"), vcConfigPath); err == nil {
-		t.Fatalf("expected error when player file directory does not exist")
-	}
-
-	playersPath := filepath.Join(dir, "players.json")
-	if err := os.WriteFile(playersPath, []byte(`{`), 0o644); err != nil {
-		t.Fatalf("failed to write players file: %v", err)
-	}
-	if _, err := New(playersPath, vcConfigPath); err == nil {
-		t.Fatalf("expected error when players file is invalid json")
+	if _, err := New(dbPath); err == nil {
+		t.Fatalf("expected error when db directory does not exist")
 	}
 }
 

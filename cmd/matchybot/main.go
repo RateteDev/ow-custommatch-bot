@@ -14,9 +14,8 @@ import (
 )
 
 const (
-	envFileName        = ".env"
-	playerDataFileName = "player_data.json"
-	vcConfigFileName   = "vc_config.json"
+	envFileName = ".env"
+	dbFileName  = "matchybot.db"
 )
 
 func executableDir() (string, error) {
@@ -109,10 +108,9 @@ func main() {
 		log.Fatalf("failed to read env: %v", err)
 	}
 
-	playerDataPath := filepath.Join(exeDir, playerDataFileName)
-	vcConfigPath := filepath.Join(exeDir, vcConfigFileName)
+	dbPath := filepath.Join(exeDir, dbFileName)
 
-	b, err := bot.New(playerDataPath, vcConfigPath)
+	b, err := bot.New(dbPath)
 	if err != nil {
 		log.Fatalf("failed to initialize bot: %v", err)
 	}
