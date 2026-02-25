@@ -1,6 +1,6 @@
 # go build artifacts
-/matchybot
-/matchybot.exe
+/ow-custommatch-bot
+/ow-custommatch-bot.exe
 /bin/*
 !/bin/.gitkeep
 

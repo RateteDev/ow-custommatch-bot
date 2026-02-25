@@ -15,7 +15,7 @@
 
 | ファイル | 対象要件 |
 |---------|---------|
-| `cmd/matchybot/main.go` | 要件2（ファイルログ） |
+| `cmd/ow-custommatch-bot/main.go` | 要件2（ファイルログ） |
 | `internal/bot/bot.go` | 要件1・3・4（全て） |
 
 ---
@@ -34,7 +34,7 @@
 
 ### 変更内容
 
-`cmd/matchybot/main.go` に `setupLogger(exeDir string) (io.Closer, error)` 関数を追加。
+`cmd/ow-custommatch-bot/main.go` に `setupLogger(exeDir string) (io.Closer, error)` 関数を追加。
 `main()` 内の `executableDir()` 解決直後に呼び出す。
 
 **ロジック:**

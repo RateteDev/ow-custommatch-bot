@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewSQLiteStoreCreatesDBAndSchema(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "matchybot.db")
+	dbPath := filepath.Join(t.TempDir(), "ow-custommatch-bot.db")
 
 	store, err := NewSQLiteStore(dbPath)
 	if err != nil {
@@ -30,7 +30,7 @@ func TestNewSQLiteStoreCreatesDBAndSchema(t *testing.T) {
 }
 
 func TestSQLiteStoreUpsertPlayerAndReload(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "matchybot.db")
+	dbPath := filepath.Join(t.TempDir(), "ow-custommatch-bot.db")
 
 	store, err := NewSQLiteStore(dbPath)
 	if err != nil {
@@ -103,7 +103,7 @@ func TestSQLiteStoreUpsertPlayerAndReload(t *testing.T) {
 }
 
 func TestSQLiteStoreUpsertPlayerSavesRankUpdatedAt(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "matchybot.db")
+	dbPath := filepath.Join(t.TempDir(), "ow-custommatch-bot.db")
 	store, err := NewSQLiteStore(dbPath)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore failed: %v", err)
@@ -133,7 +133,7 @@ func TestSQLiteStoreUpsertPlayerSavesRankUpdatedAt(t *testing.T) {
 }
 
 func TestSQLiteStoreVCConfigRoundTrip(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "matchybot.db")
+	dbPath := filepath.Join(t.TempDir(), "ow-custommatch-bot.db")
 	store, err := NewSQLiteStore(dbPath)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore failed: %v", err)
