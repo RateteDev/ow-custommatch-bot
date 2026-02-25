@@ -71,6 +71,45 @@ func TestMakeTeams(t *testing.T) {
 	}
 }
 
+func TestMakeTeamsWithRemainder(t *testing.T) {
+	r := NewRecruitment(testRankData())
+
+	players := make([]ScoredPlayer, 0, 11)
+	for i := 1; i <= 11; i++ {
+		players = append(players, ScoredPlayer{
+			ID:    string(rune('a' + i - 1)),
+			Score: float64(1000 + i),
+		})
+	}
+
+	teams, remainder := r.MakeTeamsWithRemainder(players)
+	if len(teams) != 2 {
+		t.Fatalf("expected 2 teams, got %d", len(teams))
+	}
+	if len(remainder) != 1 {
+		t.Fatalf("expected 1 remainder player, got %d", len(remainder))
+	}
+
+	seen := map[string]bool{}
+	for _, team := range teams {
+		for _, p := range team {
+			if seen[p.ID] {
+				t.Fatalf("duplicate player assigned in teams: %s", p.ID)
+			}
+			seen[p.ID] = true
+		}
+	}
+	for _, p := range remainder {
+		if seen[p.ID] {
+			t.Fatalf("remainder player also assigned to team: %s", p.ID)
+		}
+		seen[p.ID] = true
+	}
+	if len(seen) != 11 {
+		t.Fatalf("expected all 11 players to be accounted for, got %d", len(seen))
+	}
+}
+
 func TestRemoveEntry_existing(t *testing.T) {
 	r := NewRecruitment(RankDataFile{})
 	r.AddEntry("u1", "UserOne")

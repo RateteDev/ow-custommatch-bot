@@ -381,6 +381,12 @@ func (b *Bot) handleAssign(s *discordgo.Session, i *discordgo.InteractionCreate)
 		return
 	}
 
+	// VC準備・招待リンク生成で3秒制限を超えやすいため、先にインタラクションを受理する。
+	if err := b.ackInteraction(s, i); err != nil {
+		log.Printf("failed to defer assign interaction: %v", err)
+		return
+	}
+
 	scoredPlayers := make([]model.ScoredPlayer, 0, len(r.Entries))
 	for _, e := range r.Entries {
 		var player *model.PlayerInfo
@@ -406,9 +412,9 @@ func (b *Bot) handleAssign(s *discordgo.Session, i *discordgo.InteractionCreate)
 		})
 	}
 
-	teams := r.MakeTeams(scoredPlayers)
+	teams, remainder := r.MakeTeamsWithRemainder(scoredPlayers)
 	if teams == nil {
-		if err := b.respondEphemeralText(s, i, fmt.Sprintf("チーム分けには10人以上必要です（現在 %d 人）", len(scoredPlayers))); err != nil {
+		if err := b.followupEphemeralText(s, i, fmt.Sprintf("チーム分けには10人以上必要です（現在 %d 人）", len(scoredPlayers))); err != nil {
 			log.Printf("failed to respond insufficient players on assign: %v", err)
 		}
 		return
@@ -450,7 +456,7 @@ func (b *Bot) handleAssign(s *discordgo.Session, i *discordgo.InteractionCreate)
 	vcChannelIDs, err := b.ensureVCChannels(s, r.GuildID, len(teams))
 	if err != nil {
 		log.Printf("failed to ensure vc channels: %v", err)
-		if err := b.respondEphemeralText(s, i, "VCチャンネルの準備に失敗しました"); err != nil {
+		if err := b.followupEphemeralText(s, i, "VCチャンネルの準備に失敗しました"); err != nil {
 			log.Printf("failed to respond vc setup error: %v", err)
 		}
 		return
@@ -485,7 +491,7 @@ func (b *Bot) handleAssign(s *discordgo.Session, i *discordgo.InteractionCreate)
 	for res := range results {
 		if res.err != nil {
 			log.Printf("failed to create vc invite for team %s: %v", teamLabel(res.idx), res.err)
-			if err := b.respondEphemeralText(s, i, "VC招待リンクの作成に失敗しました"); err != nil {
+			if err := b.followupEphemeralText(s, i, "VC招待リンクの作成に失敗しました"); err != nil {
 				log.Printf("failed to respond vc invite error: %v", err)
 			}
 			return
@@ -493,12 +499,35 @@ func (b *Bot) handleAssign(s *discordgo.Session, i *discordgo.InteractionCreate)
 		fields[res.idx].Value += "\n[📢 VCに参加](" + res.url + ")"
 	}
 
+	if len(remainder) > 0 {
+		members := make([]string, 0, len(remainder))
+		for _, p := range remainder {
+			if strings.HasPrefix(p.ID, "dummy-") {
+				testModeResult = true
+				if p.Name != "" {
+					members = append(members, p.Name)
+					continue
+				}
+			}
+			members = append(members, "<@"+p.ID+">")
+		}
+		value := strings.Join(members, "\n")
+		if value == "" {
+			value = "（なし）"
+		}
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   fmt.Sprintf("余りメンバー（%d人）", len(remainder)),
+			Value:  value,
+			Inline: false,
+		})
+	}
+	embed.Fields = fields
+
 	if _, err := s.ChannelMessageSendEmbed(i.ChannelID, embed); err != nil {
 		log.Printf("failed to post team assignments: %v", err)
-	}
-
-	if err := b.ackInteraction(s, i); err != nil {
-		log.Printf("failed to ack assign interaction: %v", err)
+		if err := b.followupEphemeralText(s, i, "チーム振り分け結果の送信に失敗しました"); err != nil {
+			log.Printf("failed to respond assign post error: %v", err)
+		}
 	}
 }
 
@@ -531,6 +560,20 @@ func (b *Bot) ensureVCChannels(s *discordgo.Session, guildID string, teamCount i
 		}
 	}
 	if categoryMissing {
+		// カテゴリが消えている場合は保存済みVCを削除してから再作成する。
+		for _, chID := range b.vcConfig.Data.VCChannelIDs {
+			if chID == "" {
+				continue
+			}
+			if _, err := s.ChannelDelete(chID); err != nil && !isDiscord404(err) {
+				log.Printf("failed to delete orphan vc channel %s: %v", chID, err)
+			}
+		}
+
+		// 配下VCを全再作成するためID一覧をリセットする。
+		b.vcConfig.Data.CategoryID = ""
+		b.vcConfig.Data.VCChannelIDs = []string{}
+
 		ch, err := s.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{
 			Name: "MatchyBot",
 			Type: discordgo.ChannelTypeGuildCategory,
@@ -845,6 +888,14 @@ func (b *Bot) respondEphemeralText(s *discordgo.Session, i *discordgo.Interactio
 			Flags:   discordgo.MessageFlagsEphemeral,
 		},
 	})
+}
+
+func (b *Bot) followupEphemeralText(s *discordgo.Session, i *discordgo.InteractionCreate, content string) error {
+	_, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+		Content: content,
+		Flags:   discordgo.MessageFlagsEphemeral,
+	})
+	return err
 }
 
 func (b *Bot) updateComponentWithText(s *discordgo.Session, i *discordgo.InteractionCreate, content string) error {

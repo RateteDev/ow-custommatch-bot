@@ -68,17 +68,23 @@ func (r *Recruitment) CalculatePlayerScore(highestRank Rank) float64 {
 }
 
 func (r *Recruitment) MakeTeams(players []ScoredPlayer) [][]ScoredPlayer {
+	teams, _ := r.MakeTeamsWithRemainder(players)
+	return teams
+}
+
+func (r *Recruitment) MakeTeamsWithRemainder(players []ScoredPlayer) ([][]ScoredPlayer, []ScoredPlayer) {
 	if len(players) < 10 {
-		return nil
+		return nil, nil
 	}
 	target := len(players) / 5 * 5
 
 	shuffled := append([]ScoredPlayer(nil), players...)
 	rand.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+	remainder := append([]ScoredPlayer(nil), shuffled[target:]...)
 	shuffled = shuffled[:target]
 
 	sort.Slice(shuffled, func(i, j int) bool { return shuffled[i].Score > shuffled[j].Score })
-	return r.balancedScoreTeams(shuffled)
+	return r.balancedScoreTeams(shuffled), remainder
 }
 
 func (r *Recruitment) balancedScoreTeams(players []ScoredPlayer) [][]ScoredPlayer {
