@@ -31,7 +31,7 @@ VERSION ?= $(VERSION_FROM_GIT)
 # バージョン埋め込み用の ldflags です。
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: test build run release-win-exe
+.PHONY: test build run release-win-exe tag
 
 # 全テストを実行します。
 test:
@@ -50,3 +50,9 @@ run: build
 release-win-exe:
 	mkdir -p $(DIST_DIR)
 	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(WIN_RELEASE_EXE) $(CMD_PATH)
+
+# Git タグを作成して push します。使い方: make tag VERSION=v1.2.3
+tag:
+	@if [ -z "$(VERSION)" ]; then echo "Usage: make tag VERSION=v1.2.3" && exit 1; fi
+	git tag -a $(VERSION) -m "Release $(VERSION)"
+	git push origin $(VERSION)

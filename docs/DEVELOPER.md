@@ -21,26 +21,11 @@ go mod download
 
 | コマンド | 内容 |
 |---|---|
-| `make test` | ユニットテスト実行 |
-| `make build` | `bin/ow-custommatch-bot` をビルド |
-| `make run` | ビルド後に実行（内部で `make build` も実行） |
-| `make release-win-exe` | 配布用 exe を `dist/` に生成 |
-
-## ビルド
-
-```bash
-make build
-```
-
-出力先: `bin/ow-custommatch-bot`
-
-## Windows 配布用 exe
-
-```bash
-make release-win-exe
-```
-
-出力先: `dist/ow-custommatch-bot.exe`
+| `make test` | `go test ./...` を実行。全パッケージのユニットテストを確認する |
+| `make build` | `go build` でローカル用バイナリを `bin/ow-custommatch-bot` に出力 |
+| `make run` | `make build` 後に `bin/ow-custommatch-bot` を起動する |
+| `make release-win-exe` | `GOOS=windows GOARCH=amd64` でクロスコンパイルし `dist/ow-custommatch-bot.exe` を生成 |
+| `make tag VERSION=v1.2.3` | アノテーション付き Git タグを作成して push。`v*` タグを検知した GitHub Actions が Windows exe のビルド・GitHub Release 作成・リリースノート自動生成を行う |
 
 ## 実行時に必要なファイル
 
@@ -50,27 +35,7 @@ make release-win-exe
 
 - ランクマスタは `go:embed` でバイナリに埋め込まれています。
 - SQLite DB・VC 設定・ログは `%LOCALAPPDATA%\ow-custommatch-bot\` 配下に作成されます。
-- `BOT_TOKEN` は `.env` ではなく Windows Credential Manager の `ow-custommatch-bot/BOT_TOKEN` に保存されます。
-
-## 環境変数
-
-テストモード（任意）:
-
-- `OW_CUSTOMMATCH_BOT_TEST_MODE=true`
-
-テストモードを有効化すると、`/match` コマンドに `fill` オプション（boolean）が追加されます。
-`fill=true` で募集開始した場合、ダミープレイヤーを 20〜60 人ランダム追加してテスト用の振り分けを行えます。
-
-**補足:**
-
-- 判定は文字列一致のため、`true`（小文字）を設定してください。
-- テストモードを無効化したい場合は、未設定にするか `true` 以外の値を設定してください。
-
-## テスト
-
-```bash
-make test
-```
+- `BOT_TOKEN` は Windows Credential Manager の `ow-custommatch-bot/BOT_TOKEN` に保存されます。
 
 ## 保存済みトークンの削除（開発者向け）
 
@@ -81,6 +46,45 @@ cmdkey /delete:ow-custommatch-bot/BOT_TOKEN
 ```
 
 削除後に通常起動すると、初回起動と同様に `BOT_TOKEN` の入力を求められます。
+
+## バージョン管理・リリース手順
+
+バージョンの唯一の情報源は **Git Tag** です。ソースファイルにバージョン定数は持たず、ビルド時に `ldflags` で自動注入されます。
+
+### バージョン番号の決め方（Semantic Versioning）
+
+| 変更の種類 | バージョン例 | 具体例 |
+|---|---|---|
+| patch | `v0.1.1` | 不具合修正、軽微な調整 |
+| minor | `v0.2.0` | 新コマンド追加、UI 改善 |
+| major | `v1.0.0` | API 仕様の大幅変更 |
+
+### リリース手順
+
+```bash
+# 1. テストが全件パスすることを確認
+make test
+
+# 2. タグを作成して push（GitHub Actions が自動でリリース作成）
+make tag VERSION=v0.2.0
+```
+
+`make tag` を実行すると以下が行われます：
+- `git tag -a v0.2.0 -m "Release v0.2.0"` でタグ作成
+- `git push origin v0.2.0` でリモートに push
+- GitHub Actions (`release.yml`) が起動し、Windows exe のビルド・GitHub Release 作成・リリースノート自動生成が行われます
+
+> **リリースノートの編集**
+> GitHub Actions が自動生成するリリースノートはコミットタイトルの羅列であり、そのままでは自然な文章になりません。
+> GitHub Release が作成された後、Codex または Claude Code に「このリリースノートを利用者向けの日本語に書き直して」と依頼してリライトしてください。
+
+### バージョン文字列の仕組み
+
+| 状況 | 表示例 |
+|---|---|
+| タグが付いたコミット | `v0.2.0` |
+| タグなし開発ビルド | `dev-a1b2c3d` |
+| Git 外環境 | `dev` |
 
 ## 配布素材（Windows）
 
