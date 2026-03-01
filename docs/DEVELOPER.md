@@ -69,6 +69,13 @@ make test
 make tag VERSION=v0.2.0
 ```
 
+> **リリース後に更新するファイル**
+> `assets/使い方.html` 内の直接ダウンロードリンクをバージョン番号に合わせて書き換えてください。
+>
+> ```
+> https://github.com/RateteDev/ow-custommatch-bot/releases/download/vX.Y.Z/ow-custommatch-bot.exe
+> ```
+
 `make tag` を実行すると以下が行われます：
 - `git tag -a v0.2.0 -m "Release v0.2.0"` でタグ作成
 - `git push origin v0.2.0` でリモートに push
