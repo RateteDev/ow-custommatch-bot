@@ -9,6 +9,8 @@ WIN_PACKAGE_DIR := $(DIST_DIR)/$(WIN_PACKAGE_NAME)
 WIN_PACKAGE_ZIP := $(DIST_DIR)/$(WIN_PACKAGE_NAME).zip
 WIN_GUIDE_PATH := assets/windows/使い方.html
 ENV_TEMPLATE_PATH := .env.example
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+LDFLAGS := -X main.version=$(VERSION)
 
 .PHONY: test build run build-win package-win
 
@@ -17,14 +19,14 @@ test:
 
 build:
 	mkdir -p $(BIN_DIR)
-	go build -o $(BIN_PATH) $(CMD_PATH)
+	go build -ldflags "$(LDFLAGS)" -o $(BIN_PATH) $(CMD_PATH)
 
 run: build
 	./$(BIN_PATH)
 
 build-win:
 	mkdir -p $(BIN_DIR)
-	GOOS=windows GOARCH=amd64 go build -o $(WIN_BIN_PATH) $(CMD_PATH)
+	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(WIN_BIN_PATH) $(CMD_PATH)
 
 package-win: build-win
 	test -f "$(WIN_GUIDE_PATH)" || (echo "missing file: $(WIN_GUIDE_PATH)" && exit 1)
