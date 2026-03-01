@@ -10,6 +10,24 @@ import (
 	"time"
 )
 
+type fakeBotRunner struct {
+	runFunc          func(token string) error
+	setReadyNotifier func(fn func())
+}
+
+func (f *fakeBotRunner) Run(token string) error {
+	if f.runFunc != nil {
+		return f.runFunc(token)
+	}
+	return nil
+}
+
+func (f *fakeBotRunner) SetReadyNotifier(fn func()) {
+	if f.setReadyNotifier != nil {
+		f.setReadyNotifier(fn)
+	}
+}
+
 func TestPromptBotToken(t *testing.T) {
 	t.Run("正常入力", func(t *testing.T) {
 		var out bytes.Buffer
@@ -468,13 +486,41 @@ func TestStartupUIPrintBanner(t *testing.T) {
 			ui.printBanner(tt.version)
 
 			got := out.String()
-			for _, want := range []string{"OW CUSTOMMATCH BOT", tt.want, "使い方: " + guideURL} {
+			for _, want := range []string{"OW CUSTOMMATCH BOT", tt.want, "ow-custommatch-bot ガイド", "\x1b]8;;" + guideURL} {
 				if !strings.Contains(got, want) {
 					t.Fatalf("banner output missing %q: %q", want, got)
 				}
 			}
 		})
 	}
+}
+
+func TestStartupUIExternalLink(t *testing.T) {
+	t.Run("色なしでもリンクラベルとURLを含む", func(t *testing.T) {
+		ui := startupUI{style: ansiStyle{enabled: false}}
+
+		got := ui.externalLink("Discord Developer Portal", portalURL)
+
+		if !strings.Contains(got, "Discord Developer Portal") {
+			t.Fatalf("link label missing: %q", got)
+		}
+		if !strings.Contains(got, "\x1b]8;;") {
+			t.Fatalf("hyperlink sequence missing: %q", got)
+		}
+		if strings.Contains(got, "("+portalURL+")") {
+			t.Fatalf("raw URL suffix should not be included: %q", got)
+		}
+	})
+
+	t.Run("色ありならラベルを青で装飾する", func(t *testing.T) {
+		ui := startupUI{style: ansiStyle{enabled: true}}
+
+		got := ui.externalLink("Discord Developer Portal", portalURL)
+
+		if !strings.Contains(got, "\x1b[34mDiscord Developer Portal\x1b[0m") {
+			t.Fatalf("blue label missing: %q", got)
+		}
+	})
 }
 
 func TestStartupUIPrintPaths(t *testing.T) {
@@ -519,8 +565,8 @@ func TestStartupModeConfirmationMessage(t *testing.T) {
 		mode bool
 		want string
 	}{
-		{name: "prod", mode: false, want: "PROD 通常運用で起動します。"},
-		{name: "test", mode: true, want: "TEST 動作確認用で起動します。"},
+		{name: "prod", mode: false, want: "通常運用で起動します。"},
+		{name: "test", mode: true, want: "動作確認用で起動します。"},
 	}
 
 	for _, tt := range tests {
@@ -530,6 +576,232 @@ func TestStartupModeConfirmationMessage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsAuthenticationFailureError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "discord auth failure", err: errors.New("websocket: close 4004: Authentication failed."), want: true},
+		{name: "missing 4004", err: errors.New("websocket: close 1000: Authentication failed."), want: false},
+		{name: "missing auth text", err: errors.New("websocket: close 4004: connection closed"), want: false},
+		{name: "nil", err: nil, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isAuthenticationFailureError(tt.err); got != tt.want {
+				t.Fatalf("isAuthenticationFailureError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunAuthFailureRecovery(t *testing.T) {
+	origRead := readTokenFromStoreFn
+	origSave := saveTokenToStoreFn
+	origConsole := hasInteractiveConsole
+	origNewBot := newBotFn
+	origGOOS := runtimeGOOS
+	t.Cleanup(func() {
+		readTokenFromStoreFn = origRead
+		saveTokenToStoreFn = origSave
+		hasInteractiveConsole = origConsole
+		newBotFn = origNewBot
+		runtimeGOOS = origGOOS
+	})
+
+	t.Setenv("HOME", t.TempDir())
+	runtimeGOOS = "linux"
+	hasInteractiveConsole = func(stdin io.Reader, stdout io.Writer) bool {
+		return true
+	}
+
+	t.Run("認証失敗時にトークン再保存して1回だけ再試行する", func(t *testing.T) {
+		readTokenFromStoreFn = func() (string, error) {
+			return "stored-token", nil
+		}
+		saved := ""
+		saveTokenToStoreFn = func(token string) error {
+			saved = token
+			return nil
+		}
+
+		runTokens := make([]string, 0, 2)
+		readyCalls := 0
+		newBotFn = func(dbPath string) (botRunner, error) {
+			return &fakeBotRunner{
+				runFunc: func(token string) error {
+					runTokens = append(runTokens, token)
+					if len(runTokens) == 1 {
+						return errors.New("websocket: close 4004: Authentication failed.")
+					}
+					return nil
+				},
+				setReadyNotifier: func(fn func()) {
+					readyCalls++
+					if fn != nil {
+						fn()
+					}
+				},
+			}, nil
+		}
+
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		code := run([]string{"--test"}, strings.NewReader("new-token\n"), &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("run() exit code = %d, want 0, stderr=%q", code, stderr.String())
+		}
+		if saved != "new-token" {
+			t.Fatalf("saved token = %q, want %q", saved, "new-token")
+		}
+		if got := strings.Join(runTokens, ","); got != "stored-token,new-token" {
+			t.Fatalf("run tokens = %q, want %q", got, "stored-token,new-token")
+		}
+		if readyCalls == 0 {
+			t.Fatalf("ready notifier was not set")
+		}
+		output := stdout.String() + "\n" + stderr.String()
+		for _, want := range []string{
+			"Discord Developer Portal",
+			"\x1b]8;;" + portalURL,
+			"BOT_TOKEN を入力してください",
+			"Discord との接続に成功しました",
+		} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("output missing %q: %q", want, output)
+			}
+		}
+	})
+
+	t.Run("再入力が空なら終了理由を明示する", func(t *testing.T) {
+		readTokenFromStoreFn = func() (string, error) {
+			return "stored-token", nil
+		}
+		saveTokenToStoreFn = func(token string) error {
+			t.Fatalf("save should not be called, got %q", token)
+			return nil
+		}
+		runCalls := 0
+		newBotFn = func(dbPath string) (botRunner, error) {
+			return &fakeBotRunner{
+				runFunc: func(token string) error {
+					runCalls++
+					return errors.New("websocket: close 4004: Authentication failed.")
+				},
+			}, nil
+		}
+
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		code := run([]string{"--test"}, strings.NewReader("\n"), &stdout, &stderr)
+		if code != 1 {
+			t.Fatalf("run() exit code = %d, want 1", code)
+		}
+		if runCalls != 1 {
+			t.Fatalf("run calls = %d, want 1", runCalls)
+		}
+		if !strings.Contains(stderr.String(), "トークンが入力されませんでした。") {
+			t.Fatalf("stderr missing empty-token guidance: %q", stderr.String())
+		}
+	})
+
+	t.Run("保存失敗なら終了する", func(t *testing.T) {
+		readTokenFromStoreFn = func() (string, error) {
+			return "stored-token", nil
+		}
+		saveTokenToStoreFn = func(token string) error {
+			return errTokenStoreUnsupported
+		}
+		runCalls := 0
+		newBotFn = func(dbPath string) (botRunner, error) {
+			return &fakeBotRunner{
+				runFunc: func(token string) error {
+					runCalls++
+					return errors.New("websocket: close 4004: Authentication failed.")
+				},
+			}, nil
+		}
+
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		code := run([]string{"--test"}, strings.NewReader("next-token\n"), &stdout, &stderr)
+		if code != 1 {
+			t.Fatalf("run() exit code = %d, want 1", code)
+		}
+		if runCalls != 1 {
+			t.Fatalf("run calls = %d, want 1", runCalls)
+		}
+		if !strings.Contains(stderr.String(), "トークンの保存に失敗しました") {
+			t.Fatalf("stderr missing save failure guidance: %q", stderr.String())
+		}
+	})
+
+	t.Run("再試行後も認証失敗なら明示して終了する", func(t *testing.T) {
+		readTokenFromStoreFn = func() (string, error) {
+			return "stored-token", nil
+		}
+		saveTokenToStoreFn = func(token string) error {
+			return nil
+		}
+		runCalls := 0
+		newBotFn = func(dbPath string) (botRunner, error) {
+			return &fakeBotRunner{
+				runFunc: func(token string) error {
+					runCalls++
+					return errors.New("websocket: close 4004: Authentication failed.")
+				},
+			}, nil
+		}
+
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		code := run([]string{"--test"}, strings.NewReader("next-token\n"), &stdout, &stderr)
+		if code != 1 {
+			t.Fatalf("run() exit code = %d, want 1", code)
+		}
+		if runCalls != 2 {
+			t.Fatalf("run calls = %d, want 2", runCalls)
+		}
+		if !strings.Contains(stderr.String(), "再試行") {
+			t.Fatalf("stderr missing retry failure guidance: %q", stderr.String())
+		}
+	})
+
+	t.Run("一般的な実行エラーでは再設定フローに入らない", func(t *testing.T) {
+		readTokenFromStoreFn = func() (string, error) {
+			return "stored-token", nil
+		}
+		saveTokenToStoreFn = func(token string) error {
+			t.Fatalf("save should not be called, got %q", token)
+			return nil
+		}
+		runCalls := 0
+		newBotFn = func(dbPath string) (botRunner, error) {
+			return &fakeBotRunner{
+				runFunc: func(token string) error {
+					runCalls++
+					return errors.New("network timeout")
+				},
+			}, nil
+		}
+
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		code := run([]string{"--test"}, strings.NewReader("replacement-token\n"), &stdout, &stderr)
+		if code != 1 {
+			t.Fatalf("run() exit code = %d, want 1", code)
+		}
+		if runCalls != 1 {
+			t.Fatalf("run calls = %d, want 1", runCalls)
+		}
+		if strings.Contains(stdout.String()+stderr.String(), "Discord Developer Portal") {
+			t.Fatalf("unexpected auth recovery guidance: stdout=%q stderr=%q", stdout.String(), stderr.String())
+		}
+	})
 }
 
 func TestDescribeTokenError(t *testing.T) {
@@ -639,6 +911,24 @@ func TestStartupUIPrintErrorLineFormatsMessage(t *testing.T) {
 	got := errOut.String()
 	if !strings.Contains(got, "Aです。\nBです。") {
 		t.Fatalf("unexpected error output: %q", got)
+	}
+}
+
+func TestStartupUIPrintErrorLineLinkifiesKnownURL(t *testing.T) {
+	var errOut bytes.Buffer
+	ui := startupUI{err: &errOut, style: ansiStyle{enabled: true}}
+
+	ui.printErrorLine("詳しい手順は " + guideURL + " をご確認ください。")
+
+	got := errOut.String()
+	if !strings.Contains(got, "使い方ページ") {
+		t.Fatalf("link label missing: %q", got)
+	}
+	if !strings.Contains(got, "\x1b]8;;") {
+		t.Fatalf("hyperlink sequence missing: %q", got)
+	}
+	if strings.Contains(got, "("+guideURL+")") {
+		t.Fatalf("raw URL suffix should not be included: %q", got)
 	}
 }
 

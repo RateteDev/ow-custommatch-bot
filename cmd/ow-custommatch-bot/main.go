@@ -21,6 +21,7 @@ const (
 	dbFileName       = "ow-custommatch-bot.db"
 	appName          = "ow-custommatch-bot"
 	guideURL         = "https://ratetedev.github.io/ow-custommatch-bot/"
+	portalURL        = "https://discord.com/developers/applications"
 	tokenStoreTarget = appName + "/BOT_TOKEN"
 )
 
@@ -31,6 +32,7 @@ var (
 	readTokenFromStoreFn   = readTokenFromStore
 	saveTokenToStoreFn     = saveTokenToStore
 	deleteTokenFromStoreFn = deleteTokenFromStore
+	newBotFn               = func(dbPath string) (botRunner, error) { return bot.New(dbPath) }
 )
 
 var (
@@ -161,6 +163,11 @@ type startupUI struct {
 	style ansiStyle
 }
 
+type botRunner interface {
+	Run(token string) error
+	SetReadyNotifier(func())
+}
+
 func newStartupUI(out, err io.Writer) startupUI {
 	return startupUI{
 		out:   out,
@@ -169,13 +176,31 @@ func newStartupUI(out, err io.Writer) startupUI {
 	}
 }
 
+func (ui startupUI) hyperlink(label, url string) string {
+	if label == "" {
+		return url
+	}
+	text := label
+	if ui.style.enabled {
+		text = ui.style.blue(label)
+	}
+	return "\x1b]8;;" + url + "\x1b\\" + text + "\x1b]8;;\x1b\\"
+}
+
+func (ui startupUI) externalLink(label, url string) string {
+	if strings.TrimSpace(url) == "" {
+		return label
+	}
+	return ui.hyperlink(label, url)
+}
+
 func (ui startupUI) printBanner(ver string) {
 	ver = displayVersion(ver)
 	fmt.Fprintln(ui.out)
 	fmt.Fprintln(ui.out, ui.style.magenta("+- OW CUSTOMMATCH BOT --------------------------------------+"))
 	fmt.Fprintf(ui.out, "  %s\n", ui.style.bold("OW CUSTOMMATCH BOT"))
 	fmt.Fprintf(ui.out, "  %s %s\n", ui.style.cyan("Version:"), ui.style.dim(ver))
-	fmt.Fprintf(ui.out, "  %s %s\n", ui.style.cyan("使い方:"), guideURL)
+	fmt.Fprintf(ui.out, "  %s %s\n", ui.style.cyan("使い方:"), ui.externalLink("ow-custommatch-bot ガイド", guideURL))
 	fmt.Fprintln(ui.out, ui.style.magenta("+-----------------------------------------------------------+"))
 	fmt.Fprintln(ui.out)
 }
@@ -234,7 +259,15 @@ func (ui startupUI) ready() {
 }
 
 func (ui startupUI) printErrorLine(msg string) {
-	fmt.Fprintf(ui.err, "%s %s\n", ui.style.red("ERROR"), formatErrorMessageText(msg))
+	fmt.Fprintf(ui.err, "%s %s\n", ui.style.red("ERROR"), formatErrorMessageText(ui.linkifyMessage(msg)))
+}
+
+func (ui startupUI) linkifyMessage(msg string) string {
+	replacer := strings.NewReplacer(
+		portalURL, ui.externalLink("Discord Developer Portal", portalURL),
+		guideURL, ui.externalLink("使い方ページ", guideURL),
+	)
+	return replacer.Replace(msg)
 }
 
 func formatErrorMessageText(msg string) string {
@@ -506,9 +539,9 @@ func promptStartupMode(ui startupUI, stdin io.Reader, timeout time.Duration) boo
 
 func startupModeConfirmationMessage(testMode bool) string {
 	if testMode {
-		return "TEST 動作確認用で起動します。"
+		return "動作確認用で起動します。"
 	}
-	return "PROD 通常運用で起動します。"
+	return "通常運用で起動します。"
 }
 
 func setupLogger(dataDir string) (*os.File, string, error) {
@@ -631,6 +664,52 @@ func describeTokenError(err error) string {
 	}
 }
 
+func describeAuthRecoveryError(err error) string {
+	switch {
+	case errors.Is(err, errTokenInputEmpty):
+		return fmt.Sprintf("トークンが入力されませんでした。詳しい手順は %s をご確認ください。", guideURL)
+	case err != nil && strings.Contains(err.Error(), "トークンの保存に失敗しました"):
+		return fmt.Sprintf("%v。詳しい手順は %s をご確認ください。", err, guideURL)
+	case err != nil && strings.Contains(err.Error(), "再試行"):
+		return fmt.Sprintf("%v。Discord Developer Portal で BOT TOKEN を再発行または確認してください。%s", err, portalURL)
+	default:
+		return describeTokenError(err)
+	}
+}
+
+func isAuthenticationFailureError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "4004") && strings.Contains(msg, "authentication failed")
+}
+
+func recoverFromAuthenticationFailure(ui startupUI, stdin io.Reader, b botRunner, err error) error {
+	ui.printErrorLine(fmt.Sprintf("実行中にエラーが発生しました: %v", err))
+	fmt.Fprintln(ui.out)
+	fmt.Fprintf(ui.out, "  %s で BOT TOKEN を再発行または確認してください。\n", ui.externalLink("Discord Developer Portal", portalURL))
+	fmt.Fprintln(ui.out, "  新しい BOT_TOKEN を入力すると、その場で上書きして再試行します。")
+	fmt.Fprintln(ui.out)
+
+	token, promptErr := promptBotToken(ui, stdin)
+	if promptErr != nil {
+		return promptErr
+	}
+	if err := saveTokenToStoreFn(token); err != nil {
+		return fmt.Errorf("トークンの保存に失敗しました: %w", err)
+	}
+
+	fmt.Fprintln(ui.out, "  保存済みトークンを更新しました。接続を再試行します。")
+	if err := b.Run(token); err != nil {
+		if isAuthenticationFailureError(err) {
+			return fmt.Errorf("認証失敗のため再試行しましたが、再度失敗しました: %w", err)
+		}
+		return fmt.Errorf("再試行後も実行中にエラーが発生しました: %w", err)
+	}
+	return nil
+}
+
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	ui := newStartupUI(stdout, stderr)
 
@@ -718,7 +797,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	log.Printf("[INFO] [3/3] Bot初期化 (DB: %s) ... 開始", dbPath)
 
-	b, err := bot.New(dbPath)
+	b, err := newBotFn(dbPath)
 	if err != nil {
 		ui.stepFail(3, 3, "Bot初期化")
 		log.Printf("[ERROR] Bot初期化に失敗: %v", err)
@@ -734,6 +813,17 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	})
 
 	if err := b.Run(botToken); err != nil {
+		if isAuthenticationFailureError(err) {
+			log.Printf("[WARN] Bot認証に失敗: %v", err)
+			if recoverErr := recoverFromAuthenticationFailure(ui, stdin, b, err); recoverErr != nil {
+				log.Printf("[ERROR] 認証失敗からの復旧に失敗: %v", recoverErr)
+				ui.printErrorLine("認証失敗から復旧できませんでした: " + describeAuthRecoveryError(recoverErr))
+				return 1
+			}
+			log.Printf("[INFO] 認証失敗からの再試行で接続に成功しました。")
+			log.Printf("[INFO] Botを終了しました。")
+			return 0
+		}
 		log.Printf("[ERROR] Bot実行エラー: %v", err)
 		ui.printErrorLine(fmt.Sprintf("実行中にエラーが発生しました: %v", err))
 		return 1

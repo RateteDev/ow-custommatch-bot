@@ -110,6 +110,16 @@
       padding: 0.14em 0.45em;
     }
 
+    a {
+      color: var(--accent);
+      text-decoration-thickness: 1.5px;
+      text-underline-offset: 0.16em;
+    }
+
+    a:hover {
+      text-decoration-thickness: 2px;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -310,6 +320,7 @@
           <ul>
             <li>起動メニューの <code>[3] トークンを上書きする</code> を選びます。</li>
             <li>新しい <code>BOT_TOKEN</code> を入力すると、保存済みトークンが更新されます。</li>
+            <li>認証失敗時も、その場で新しい <code>BOT_TOKEN</code> を入力して再試行できます。</li>
             <li>トークン値そのものを確認表示する機能はありません。</li>
           </ul>
         </div>
@@ -334,9 +345,13 @@
               <strong>別のトークンに変更したい</strong><br>
               起動メニューの <code>[3] トークンを上書きする</code> を選び、新しいトークンを入力してください。
             </div>
+            <div class="note warn">
+              <strong>Authentication failed と表示された</strong><br>
+              画面に表示される <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Discord Developer Portal</a> を開き、<code>BOT TOKEN</code> を再発行または確認してください。案内に従って新しいトークンを入力すると、そのまま再試行できます。
+            </div>
             <div class="note danger">
               <strong>BOT_TOKEN の設定に失敗しました</strong><br>
-              Windows Credential Manager に保存できなかった可能性があります。再起動して入力し直してください。
+              Windows Credential Manager に保存できなかった可能性があります。詳しい手順は <a href="https://ratetedev.github.io/ow-custommatch-bot/" target="_blank" rel="noreferrer">使い方ページ</a> をご確認ください。
             </div>
           </div>
         </div>
