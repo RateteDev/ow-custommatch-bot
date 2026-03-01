@@ -529,6 +529,10 @@
       <section class="card">
         <div class="card-num">1</div>
         <h2>セットアップ</h2>
+        <div class="note info" style="margin-bottom: 20px;">
+          <strong>動作環境</strong>
+          Windows 10 / 11 専用です。Bot の招待には、Discord サーバーの管理者権限が必要です。
+        </div>
         <ol>
           <li>
             <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Discord Developer Portal</a>
@@ -536,16 +540,21 @@
           </li>
           <li>
             GitHub Release から <code>ow-custommatch-bot.exe</code> をダウンロードします。配布物は exe 1 ファイルのみです。
+            <ul>
+              <li>直接ダウンロード → <a href="https://github.com/RateteDev/ow-custommatch-bot/releases/latest" target="_blank" rel="noreferrer">https://github.com/RateteDev/ow-custommatch-bot/releases/latest</a></li>
+            </ul>
           </li>
           <li>
             <code>ow-custommatch-bot.exe</code> を起動し、画面の案内に従って <code>BOT_TOKEN</code> を入力します。
           </li>
           <li>
-            入力したトークンは Windows Credential Manager の <code>ow-custommatch-bot/BOT_TOKEN</code> に保存されます。
-            プレイヤー情報やログは <code>%LOCALAPPDATA%\ow-custommatch-bot\</code> 配下に保存されます。
+            設定・プレイヤー情報・ログはすべてお使いの PC 内（<code>%LOCALAPPDATA%\ow-custommatch-bot\</code>）に保存されます。Bot トークンは Windows Credential Manager に安全に保存されるため、次回起動から入力不要になります。
           </li>
           <li>
             Discord サーバーに Bot を招待します。招待時のスコープは <code>bot</code> と <code>applications.commands</code> を選択してください。
+            <ul>
+              <li>Bot 権限は「メッセージを送信」「埋め込みリンク」を付与してください。</li>
+            </ul>
           </li>
         </ol>
       </section>
@@ -598,7 +607,7 @@
         <h3>振り分けの仕組み</h3>
         <div class="panel-list">
           <div class="note info">
-            5 の倍数人数でチームを編成します。端数は「余りメンバー」として別表示されます。
+            5 の倍数人数でチームを編成します（例：10人 → 5人×2チーム、11人 → 5人×2チーム＋余り1人）。端数は「余りメンバー」として別表示されます。
           </div>
           <div class="note info">
             ランクスコアを基準に、できるだけバランスが取れるよう振り分けます。
