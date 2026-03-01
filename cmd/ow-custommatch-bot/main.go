@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -19,27 +18,30 @@ import (
 )
 
 const (
-	envFileName = ".env"
-	dbFileName  = "ow-custommatch-bot.db"
-	appName     = "ow-custommatch-bot"
+	dbFileName       = "ow-custommatch-bot.db"
+	appName          = "ow-custommatch-bot"
+	guideURL         = "https://ratetedev.github.io/ow-custommatch-bot/"
+	tokenStoreTarget = appName + "/BOT_TOKEN"
 )
 
 var version = "dev"
 var runtimeGOOS = runtime.GOOS
 var hasInteractiveConsole = detectInteractiveConsole
+var (
+	readTokenFromStoreFn = readTokenFromStore
+	saveTokenToStoreFn   = saveTokenToStore
+)
 
-const botTokenPlaceholder = "YOUR_DISCORD_BOT_TOKEN"
+var (
+	errTokenNotFound         = errors.New("bot token not found")
+	errTokenStoreUnsupported = errors.New("credential store is not supported")
+	errTokenInputEmpty       = errors.New("bot token is empty")
+)
 
 type cliOptions struct {
 	showHelp    bool
 	showVersion bool
 	testMode    bool
-}
-
-type requiredEnvErr string
-
-func (e requiredEnvErr) Error() string {
-	return fmt.Sprintf("%s is required", string(e))
 }
 
 type ansiStyle struct {
@@ -85,11 +87,11 @@ func (ui startupUI) printBanner(ver string) {
 	fmt.Fprintln(ui.out)
 }
 
-func (ui startupUI) printPaths(exeDir, logPath, dbPath string) {
+func (ui startupUI) printPaths(dataDir, logPath, dbPath string) {
 	label := func(name string) string {
 		return ui.style.cyan(fmt.Sprintf("%-4s", name))
 	}
-	fmt.Fprintf(ui.out, "%s %s\n", label("exe"), exeDir)
+	fmt.Fprintf(ui.out, "%s %s\n", label("data"), dataDir)
 	fmt.Fprintf(ui.out, "%s %s\n", label("log"), logPath)
 	fmt.Fprintf(ui.out, "%s %s\n", label("db"), dbPath)
 	fmt.Fprintln(ui.out)
@@ -319,60 +321,19 @@ func pauseOnErrorExit(code int, stdin io.Reader, stdout io.Writer) {
 	_, _ = bufio.NewReader(stdin).ReadString('\n')
 }
 
-func executableDir() (string, error) {
-	exePath, err := os.Executable()
+func appDataDir(name string) (string, error) {
+	if runtimeGOOS == "windows" {
+		local := os.Getenv("LOCALAPPDATA")
+		if local == "" {
+			return "", fmt.Errorf("LOCALAPPDATA 環境変数が設定されていません")
+		}
+		return filepath.Join(local, name), nil
+	}
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("resolve executable path: %w", err)
+		return "", fmt.Errorf("ホームディレクトリを取得できません: %w", err)
 	}
-	return filepath.Dir(exePath), nil
-}
-
-func loadEnvFile(path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("open env file: %w", err)
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		key, value, found := strings.Cut(line, "=")
-		if !found {
-			return fmt.Errorf("invalid env format at line %d", lineNo)
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if key == "" {
-			return fmt.Errorf("empty env key at line %d", lineNo)
-		}
-
-		if err := os.Setenv(key, value); err != nil {
-			return fmt.Errorf("set env %s: %w", key, err)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("scan env file: %w", err)
-	}
-	return nil
-}
-
-func requiredEnv(key string) (string, error) {
-	value := strings.TrimSpace(os.Getenv(key))
-	if key == "BOT_TOKEN" && strings.EqualFold(value, botTokenPlaceholder) {
-		return "", requiredEnvErr(key)
-	}
-	if value == "" {
-		return "", requiredEnvErr(key)
-	}
-	return value, nil
+	return filepath.Join(home, ".local", "share", name), nil
 }
 
 func promptBotToken(ui startupUI, stdin io.Reader) (string, error) {
@@ -382,8 +343,8 @@ func promptBotToken(ui startupUI, stdin io.Reader) (string, error) {
 		return "", fmt.Errorf("read token: %w", err)
 	}
 	token := strings.TrimSpace(line)
-	if token == "" || strings.EqualFold(token, botTokenPlaceholder) {
-		return "", fmt.Errorf("トークンが入力されませんでした")
+	if token == "" {
+		return "", errTokenInputEmpty
 	}
 	return token, nil
 }
@@ -414,35 +375,8 @@ func promptStartupMode(ui startupUI, stdin io.Reader, timeout time.Duration) boo
 	}
 }
 
-func saveTokenToEnv(envPath, token string) error {
-	existing, err := os.ReadFile(envPath)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("read env file: %w", err)
-	}
-	line := "BOT_TOKEN=" + token
-	if len(existing) == 0 {
-		return os.WriteFile(envPath, []byte(line+"\n"), 0o644)
-	}
-	content := strings.TrimRight(string(existing), "\n")
-	lines := strings.Split(content, "\n")
-	found := false
-	for i, l := range lines {
-		key, _, ok := strings.Cut(strings.TrimSpace(l), "=")
-		if ok && strings.TrimSpace(key) == "BOT_TOKEN" {
-			lines[i] = line
-			found = true
-			break
-		}
-	}
-	if !found {
-		lines = append(lines, line)
-	}
-	content = strings.Join(lines, "\n")
-	return os.WriteFile(envPath, []byte(content+"\n"), 0o644)
-}
-
-func setupLogger(exeDir string) (*os.File, string, error) {
-	logDir := filepath.Join(exeDir, ".logs")
+func setupLogger(dataDir string) (*os.File, string, error) {
+	logDir := filepath.Join(dataDir, ".logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return nil, "", fmt.Errorf("create log dir: %w", err)
 	}
@@ -488,58 +422,55 @@ func cliUsageText(exeName string) string {
   %s [--help] [--version]
 
 起動前の準備:
-  1. 実行ファイルと同じフォルダに .env を配置してください
-  2. .env に BOT_TOKEN=... を設定してください
+  1. 初回起動時に BOT_TOKEN を入力すると保存されます
+  2. Windows では Credential Manager に安全に保存されます
+  3. 詳しい手順: %s
 
 オプション:
   --help, -h    このヘルプを表示
   --version     バージョンを表示
   --test        テストモードで起動（テスト用ダミーデータを使用）
-`, appName, exeName)
+`, appName, exeName, guideURL)
 }
 
-func describeStartupError(envPath, requiredKey, _ string, err error) string {
-	guidePath := filepath.Join(filepath.Dir(envPath), "使い方.html")
-	if errors.Is(err, fs.ErrNotExist) {
-		return fmt.Sprintf(
-			"設定ファイルが見つかりません: %s\nexe と同じフォルダに .env を配置し、例のように設定してください: %s=%s\n詳しい手順は同じフォルダの 使い方.html をご確認ください: %s",
-			envPath,
-			requiredKey,
-			botTokenPlaceholder,
-			guidePath,
-		)
+func resolveToken(stdin io.Reader, ui startupUI) (string, error) {
+	token, err := readTokenFromStoreFn()
+	if err == nil {
+		token = strings.TrimSpace(token)
+		if token == "" {
+			return "", errTokenNotFound
+		}
+		return token, nil
+	}
+	if !errors.Is(err, errTokenNotFound) && !errors.Is(err, errTokenStoreUnsupported) {
+		return "", fmt.Errorf("トークンの読み込みに失敗しました: %w", err)
+	}
+	if !hasInteractiveConsole(stdin, ui.out) {
+		return "", err
 	}
 
-	var envErr requiredEnvErr
-	if errors.As(err, &envErr) {
-		return fmt.Sprintf(
-			"必須設定 %s が未設定です。%s に `%s=%s` を設定してください。\n`%s=%s` のままでも未設定扱いです。\n詳しい手順は同じフォルダの 使い方.html をご確認ください: %s",
-			string(envErr),
-			envPath,
-			string(envErr),
-			botTokenPlaceholder,
-			string(envErr),
-			botTokenPlaceholder,
-			guidePath,
-		)
+	fmt.Fprintln(ui.out)
+	token, err = promptBotToken(ui, stdin)
+	if err != nil {
+		return "", err
 	}
-
-	msg := err.Error()
-	if strings.Contains(msg, "invalid env format at line") || strings.Contains(msg, "empty env key at line") {
-		return fmt.Sprintf(
-			".env の書式が正しくありません（%s）。\n各行は `KEY=VALUE` 形式で記述してください（例: %s=%s）。\n詳しい手順は同じフォルダの 使い方.html をご確認ください: %s",
-			msg,
-			requiredKey,
-			botTokenPlaceholder,
-			guidePath,
-		)
+	if err := saveTokenToStoreFn(token); err != nil {
+		return "", fmt.Errorf("トークンの保存に失敗しました: %w", err)
 	}
+	return token, nil
+}
 
-	return fmt.Sprintf(
-		"設定の読み込み中にエラーが発生しました（%s）。\n設定内容を確認し、詳しい手順は同じフォルダの 使い方.html をご確認ください: %s",
-		msg,
-		guidePath,
-	)
+func describeTokenError(err error) string {
+	switch {
+	case errors.Is(err, errTokenNotFound):
+		return fmt.Sprintf("BOT_TOKEN が保存されていません。初回起動時は対話入力で保存してください。詳しい手順は %s をご確認ください。", guideURL)
+	case errors.Is(err, errTokenStoreUnsupported):
+		return fmt.Sprintf("この OS では資格情報ストアを利用できません。対応手順は %s をご確認ください。", guideURL)
+	case errors.Is(err, errTokenInputEmpty):
+		return fmt.Sprintf("トークンが入力されませんでした。詳しい手順は %s をご確認ください。", guideURL)
+	default:
+		return fmt.Sprintf("BOT_TOKEN の設定に失敗しました（%v）。詳しい手順は %s をご確認ください。", err, guideURL)
+	}
 }
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -560,22 +491,26 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	exeDir, err := executableDir()
+	dataDir, err := appDataDir(appName)
 	if err != nil {
-		ui.printErrorLine(fmt.Sprintf("起動に失敗しました: 実行ディレクトリを取得できませんでした: %v", err))
+		ui.printErrorLine(fmt.Sprintf("起動に失敗しました: データ保存先を取得できませんでした: %v", err))
+		return 1
+	}
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		ui.printErrorLine(fmt.Sprintf("起動に失敗しました: データ保存先を作成できませんでした: %v", err))
 		return 1
 	}
 
-	logFile, logPath, err := setupLogger(exeDir)
+	logFile, logPath, err := setupLogger(dataDir)
 	if err != nil {
 		ui.printErrorLine(fmt.Sprintf("起動に失敗しました: ログを初期化できませんでした: %v", err))
 		return 1
 	}
 	defer logFile.Close()
 
-	dbPath := filepath.Join(exeDir, dbFileName)
+	dbPath := filepath.Join(dataDir, dbFileName)
 	ui.printBanner(version)
-	ui.printPaths(exeDir, logPath, dbPath)
+	ui.printPaths(dataDir, logPath, dbPath)
 
 	testMode := opts.testMode
 	if !testMode && hasInteractiveConsole(stdin, stdout) {
@@ -590,63 +525,35 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "  %s 本番モードで起動します。\n\n", ui.style.green("PROD"))
 	}
 
-	ui.stepOK(1, 4, "ログ初期化")
+	ui.stepOK(1, 3, "ログ初期化")
 
 	log.Printf("[INFO] %s %s", appName, version)
-	log.Printf("[INFO] 実行ディレクトリ: %s", exeDir)
-	log.Printf("[INFO] [1/4] ログ初期化 ... OK")
+	log.Printf("[INFO] データ保存先: %s", dataDir)
+	log.Printf("[INFO] [1/3] ログ初期化 ... OK")
 	log.Printf("[INFO] ログファイル: %s", logPath)
 
-	envPath := filepath.Join(exeDir, envFileName)
-	log.Printf("[INFO] [2/4] 設定ファイル読込 (%s) ... 開始", envPath)
-	if err := loadEnvFile(envPath); err != nil {
-		ui.stepFail(2, 4, "設定ファイル読込")
-		log.Printf("[ERROR] 設定ファイル読込に失敗: %v", err)
-		ui.printErrorLine("起動に失敗しました: " + describeStartupError(envPath, "BOT_TOKEN", dbFileName, err))
+	log.Printf("[INFO] [2/3] トークン読込 ... 開始")
+	botToken, err := resolveToken(stdin, ui)
+	if err != nil {
+		ui.stepFail(2, 3, "トークン読込")
+		log.Printf("[ERROR] トークン読込に失敗: %v", err)
+		ui.printErrorLine("起動に失敗しました: " + describeTokenError(err))
 		return 1
 	}
-	ui.stepOK(2, 4, "設定ファイル読込")
-	log.Printf("[INFO] [2/4] 設定ファイル読込 ... OK")
+	ui.stepOK(2, 3, "トークン読込")
+	log.Printf("[INFO] [2/3] トークン読込 ... OK")
 
-	log.Printf("[INFO] [3/4] 必須設定チェック ... 開始")
-	botToken, err := requiredEnv("BOT_TOKEN")
-	if err != nil {
-		if hasInteractiveConsole(stdin, stdout) {
-			fmt.Fprintln(stdout)
-			token, promptErr := promptBotToken(ui, stdin)
-			if promptErr != nil {
-				ui.stepFail(3, 4, "必須設定チェック")
-				log.Printf("[ERROR] トークン入力に失敗: %v", promptErr)
-				ui.printErrorLine("起動に失敗しました: トークンが入力されませんでした。")
-				return 1
-			}
-			if saveErr := saveTokenToEnv(envPath, token); saveErr != nil {
-				log.Printf("[WARN] .env への保存に失敗しました: %v", saveErr)
-			} else {
-				log.Printf("[INFO] BOT_TOKEN を %s に保存しました", envPath)
-			}
-			botToken = token
-		} else {
-			ui.stepFail(3, 4, "必須設定チェック")
-			log.Printf("[ERROR] 必須設定チェックに失敗: %v", err)
-			ui.printErrorLine("起動に失敗しました: " + describeStartupError(envPath, "BOT_TOKEN", dbFileName, err))
-			return 1
-		}
-	}
-	ui.stepOK(3, 4, "必須設定チェック")
-	log.Printf("[INFO] [3/4] 必須設定チェック ... OK")
-
-	log.Printf("[INFO] [4/4] Bot初期化 (DB: %s) ... 開始", dbPath)
+	log.Printf("[INFO] [3/3] Bot初期化 (DB: %s) ... 開始", dbPath)
 
 	b, err := bot.New(dbPath)
 	if err != nil {
-		ui.stepFail(4, 4, "Bot初期化")
+		ui.stepFail(3, 3, "Bot初期化")
 		log.Printf("[ERROR] Bot初期化に失敗: %v", err)
 		ui.printErrorLine(fmt.Sprintf("起動に失敗しました: Bot初期化に失敗しました（DB: %s）: %v", dbPath, err))
 		return 1
 	}
-	ui.stepOK(4, 4, "Bot初期化")
-	log.Printf("[INFO] [4/4] Bot初期化 ... OK")
+	ui.stepOK(3, 3, "Bot初期化")
+	log.Printf("[INFO] [3/3] Bot初期化 ... OK")
 	ui.ready()
 	log.Printf("[INFO] Discord接続を開始します。終了するには Ctrl+C を押してください。")
 	enableConsoleLogging(logFile, stdout, ui.style.enabled)
