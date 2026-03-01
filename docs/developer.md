@@ -21,8 +21,7 @@
 make test       # ユニットテスト実行
 make build      # bin/ow-custommatch-bot をビルド
 make run        # bin/ow-custommatch-bot を実行（内部で make build 実行）
-make build-win  # Windows 向け bin/ow-custommatch-bot.exe をビルド
-make release-win-exe # 配布用 exe を dist/ にコピー
+make release-win-exe # 配布用 exe を dist/ に生成
 ```
 
 ## ビルド出力先
@@ -33,7 +32,6 @@ make release-win-exe # 配布用 exe を dist/ にコピー
 
 ```bash
 make build
-make build-win
 ```
 
 ## Windows 配布用 exe
@@ -65,12 +63,6 @@ make release-win-exe
 
 テストモードを有効化すると、`/match` コマンドに `fill` オプション（boolean）が追加されます。
 `fill=true` で募集開始した場合、ダミープレイヤーを20〜60人ランダム追加してテスト用の振り分けを行えます。
-
-例（`bin/.env`）:
-
-```dotenv
-OW_CUSTOMMATCH_BOT_TEST_MODE=true
-```
 
 補足:
 - 判定は文字列一致のため、`true`（小文字）を設定してください。
