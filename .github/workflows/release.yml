@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install 7z
+        run: sudo apt-get install -y p7zip-full
+
+      - name: Test
+        run: go test ./...
+
+      - name: Package Windows
+        run: make package-win VERSION=${{ github.ref_name }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ow-custommatch-bot-win64.zip
