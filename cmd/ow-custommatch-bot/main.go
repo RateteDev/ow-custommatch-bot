@@ -84,16 +84,17 @@ func (ui startupUI) printBanner(ver string) {
 	fmt.Fprintln(ui.out, ui.style.magenta("+- OW CUSTOMMATCH BOT --------------------------------------+"))
 	fmt.Fprintf(ui.out, "%s %s\n", ui.style.bold("  Overwatch Custom Match Assistant"), ui.style.dim("v"+ver))
 	fmt.Fprintln(ui.out, ui.style.magenta("+-----------------------------------------------------------+"))
+	fmt.Fprintf(ui.out, "  %s %s\n", ui.style.cyan("ご利用ガイド:"), guideURL)
 	fmt.Fprintln(ui.out)
 }
 
 func (ui startupUI) printPaths(dataDir, logPath, dbPath string) {
 	label := func(name string) string {
-		return ui.style.cyan(fmt.Sprintf("%-4s", name))
+		return ui.style.cyan(fmt.Sprintf("%-7s", name))
 	}
-	fmt.Fprintf(ui.out, "%s %s\n", label("data"), dataDir)
-	fmt.Fprintf(ui.out, "%s %s\n", label("log"), logPath)
-	fmt.Fprintf(ui.out, "%s %s\n", label("db"), dbPath)
+	fmt.Fprintf(ui.out, "  %s %s\n", label("データ保存先"), dataDir)
+	fmt.Fprintf(ui.out, "  %s %s\n", label("ログファイル"), logPath)
+	fmt.Fprintf(ui.out, "  %s %s\n", label("データベース"), dbPath)
 	fmt.Fprintln(ui.out)
 }
 
@@ -132,8 +133,8 @@ func (ui startupUI) stepFail(i, total int, title string) {
 
 func (ui startupUI) ready() {
 	fmt.Fprintln(ui.out)
-	fmt.Fprintf(ui.out, "%s Discord接続を開始します。終了するには %s を押してください。\n\n",
-		ui.style.green("READY"),
+	fmt.Fprintf(ui.out, "%s Discordへの接続を開始します。終了するには %s を押してください。\n\n",
+		ui.style.green("準備完了"),
 		ui.style.bold("Ctrl+C"),
 	)
 }
@@ -351,10 +352,17 @@ func promptBotToken(ui startupUI, stdin io.Reader) (string, error) {
 
 func promptStartupMode(ui startupUI, stdin io.Reader, timeout time.Duration) bool {
 	fmt.Fprintln(ui.out)
-	fmt.Fprintln(ui.out, ui.style.bold("  起動モードを選択してください"))
-	fmt.Fprintln(ui.out, "    [1] 本番モード  (デフォルト)")
-	fmt.Fprintln(ui.out, "    [2] テストモード")
-	fmt.Fprintf(ui.out, "  %d秒後に [1] で自動起動します。> ", int(timeout.Seconds()))
+	fmt.Fprintln(ui.out, ui.style.bold("  起動方法を選択してください"))
+	fmt.Fprintln(ui.out, "  普段そのままお使いになる場合は [1] を選んでください。")
+	fmt.Fprintln(ui.out, "  表示確認や試運転をしたい場合は [2] を選んでください。")
+	fmt.Fprintln(ui.out)
+	fmt.Fprintln(ui.out, "    [1] 通常運用")
+	fmt.Fprintln(ui.out, "        実際の運用として起動します。")
+	fmt.Fprintln(ui.out, "    [2] 動作確認用")
+	fmt.Fprintln(ui.out, "        テスト用ダミーデータで画面や流れを確認できます。")
+	fmt.Fprintln(ui.out)
+	fmt.Fprintln(ui.out, "  Enterキーですぐに通常運用を開始できます。")
+	fmt.Fprintf(ui.out, "  未入力の場合は%d秒後に自動で通常運用を開始します。> ", int(timeout.Seconds()))
 
 	ch := make(chan string, 1)
 	go func() {
@@ -373,6 +381,13 @@ func promptStartupMode(ui startupUI, stdin io.Reader, timeout time.Duration) boo
 		fmt.Fprintln(ui.out)
 		return false
 	}
+}
+
+func startupModeConfirmationMessage(testMode bool) string {
+	if testMode {
+		return "TEST 動作確認用で起動します。"
+	}
+	return "PROD 通常運用で起動します。"
 }
 
 func setupLogger(dataDir string) (*os.File, string, error) {
@@ -406,7 +421,7 @@ func parseCLIArgs(args []string) (cliOptions, error) {
 	fs.BoolVar(&opts.showHelp, "help", false, "show help")
 	fs.BoolVar(&opts.showHelp, "h", false, "show help")
 	fs.BoolVar(&opts.showVersion, "version", false, "show version")
-	fs.BoolVar(&opts.testMode, "test", false, "テストモードで起動")
+	fs.BoolVar(&opts.testMode, "test", false, "動作確認用で起動")
 	if err := fs.Parse(args); err != nil {
 		return cliOptions{}, err
 	}
@@ -429,7 +444,7 @@ func cliUsageText(exeName string) string {
 オプション:
   --help, -h    このヘルプを表示
   --version     バージョンを表示
-  --test        テストモードで起動（テスト用ダミーデータを使用）
+  --test        動作確認用で起動（テスト用ダミーデータを使用）
 `, appName, exeName, guideURL)
 }
 
@@ -520,9 +535,13 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if err := os.Setenv("OW_CUSTOMMATCH_BOT_TEST_MODE", "true"); err != nil {
 			log.Printf("[WARN] テストモード環境変数の設定に失敗: %v", err)
 		}
-		fmt.Fprintf(stdout, "  %s テストモードで起動します。\n\n", ui.style.yellow("TEST"))
 	} else {
-		fmt.Fprintf(stdout, "  %s 本番モードで起動します。\n\n", ui.style.green("PROD"))
+	}
+	modeLabel := startupModeConfirmationMessage(testMode)
+	if testMode {
+		fmt.Fprintf(stdout, "  %s\n\n", ui.style.yellow(modeLabel))
+	} else {
+		fmt.Fprintf(stdout, "  %s\n\n", ui.style.green(modeLabel))
 	}
 
 	ui.stepOK(1, 3, "ログ初期化")
