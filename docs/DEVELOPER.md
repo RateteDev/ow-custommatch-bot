@@ -7,26 +7,24 @@
 
 ## 必要なもの
 
-- Go 1.22 以上
+- Go 1.26 以上
 
 ## セットアップ
 
-初回のみ、Go Modules の依存関係を取得・整備してください。
+初回のみ、依存パッケージを取得してください。
+
+```bash
+go mod download
+```
 
 ## 開発用コマンド（Makefile）
 
-`Makefile` を用意しているため、開発時は以下を利用できます。
-
-```bash
-make test       # ユニットテスト実行
-make build      # bin/ow-custommatch-bot をビルド
-make run        # bin/ow-custommatch-bot を実行（内部で make build 実行）
-make release-win-exe # 配布用 exe を dist/ に生成
-```
-
-## ビルド出力先
-
-当面、ビルド済みファイルはリポジトリ内の `bin/` に配置します（最終的には Release 配布を想定）。
+| コマンド | 内容 |
+|---|---|
+| `make test` | ユニットテスト実行 |
+| `make build` | `bin/ow-custommatch-bot` をビルド |
+| `make run` | ビルド後に実行（内部で `make build` も実行） |
+| `make release-win-exe` | 配布用 exe を `dist/` に生成 |
 
 ## ビルド
 
@@ -34,25 +32,24 @@ make release-win-exe # 配布用 exe を dist/ に生成
 make build
 ```
 
+出力先: `bin/ow-custommatch-bot`
+
 ## Windows 配布用 exe
 
 ```bash
 make release-win-exe
 ```
 
-生成物:
-
-- `dist/ow-custommatch-bot.exe`
+出力先: `dist/ow-custommatch-bot.exe`
 
 ## 実行時に必要なファイル
 
-- `ow-custommatch-bot.db`
-  初回起動時に自動生成されます。
+- `ow-custommatch-bot.db` — 初回起動時に自動生成されます。
 
-補足:
+**補足:**
 
 - ランクマスタは `go:embed` でバイナリに埋め込まれています。
-- SQLite DB、VC 設定、ログは `%LOCALAPPDATA%\ow-custommatch-bot\` 配下に作成されます。
+- SQLite DB・VC 設定・ログは `%LOCALAPPDATA%\ow-custommatch-bot\` 配下に作成されます。
 - `BOT_TOKEN` は `.env` ではなく Windows Credential Manager の `ow-custommatch-bot/BOT_TOKEN` に保存されます。
 
 ## 環境変数
@@ -62,9 +59,10 @@ make release-win-exe
 - `OW_CUSTOMMATCH_BOT_TEST_MODE=true`
 
 テストモードを有効化すると、`/match` コマンドに `fill` オプション（boolean）が追加されます。
-`fill=true` で募集開始した場合、ダミープレイヤーを20〜60人ランダム追加してテスト用の振り分けを行えます。
+`fill=true` で募集開始した場合、ダミープレイヤーを 20〜60 人ランダム追加してテスト用の振り分けを行えます。
 
-補足:
+**補足:**
+
 - 判定は文字列一致のため、`true`（小文字）を設定してください。
 - テストモードを無効化したい場合は、未設定にするか `true` 以外の値を設定してください。
 

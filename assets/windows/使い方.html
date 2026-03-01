@@ -218,16 +218,16 @@
   <main class="container">
     <section class="hero">
       <h1>ow-custommatch-bot 使い方</h1>
-      <p>Discord 上でカスタムマッチ募集、ランク登録、チーム振り分けを行うための利用ガイドです。初回セットアップから募集の流れ、よくあるエラー対処までまとめています。</p>
+      <p>Discord 上でカスタムマッチの募集・ランク登録・チーム振り分けを行うための利用ガイドです。初回セットアップから募集の流れ、よくあるエラーへの対処まとめています。</p>
     </section>
 
     <div class="grid">
       <section class="card">
         <h2>1. セットアップ（利用者向け）</h2>
         <ol>
-          <li>Discord Developer Portal でアプリケーションを作成し、Bot トークンを取得します。</li>
-          <li>GitHub Release から <code>ow-custommatch-bot.exe</code> を取得します。配布物は exe 1 ファイルのみです。</li>
-          <li><code>ow-custommatch-bot.exe</code> を起動し、初回表示に従って <code>BOT_TOKEN</code> を入力します。</li>
+          <li><a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Discord Developer Portal</a> でアプリケーションを作成し、Bot トークンを取得します。</li>
+          <li>GitHub Release から <code>ow-custommatch-bot.exe</code> をダウンロードします。配布物は exe 1 ファイルのみです。</li>
+          <li><code>ow-custommatch-bot.exe</code> を起動し、画面の案内に従って <code>BOT_TOKEN</code> を入力します。</li>
           <li>入力したトークンは Windows Credential Manager の <code>ow-custommatch-bot/BOT_TOKEN</code> に保存されます。プレイヤー情報やログは <code>%LOCALAPPDATA%\ow-custommatch-bot\</code> 配下に保存されます。</li>
           <li>Discord サーバーに Bot を招待します。招待時のスコープは <code>bot</code> と <code>applications.commands</code> を選択してください。</li>
         </ol>
@@ -260,12 +260,12 @@
       <section class="card">
         <h2>3. <code>/match</code> の操作フロー</h2>
         <ol>
-          <li>発案者が <code>/match</code> を実行すると、募集 Embed が投稿されます。</li>
-          <li>同じチャンネルですでに募集が開いている場合は、今の募集を閉じて新しく始めるか、そのままキャンセルするかを選べます。</li>
+          <li>発案者が <code>/match</code> を実行すると、募集パネルが投稿されます。</li>
+          <li>同じチャンネルにすでに募集が開いている場合は、現在の募集を閉じて新しく始めるか、そのままキャンセルするかを選べます。</li>
           <li>参加者が「エントリー」を押します。
             <ul>
-              <li>ランク未登録の場合はランク登録フローが開始し、登録完了後に自動でエントリーされます。</li>
-              <li>ランク登録が 30 日以上前の場合は再登録フローが開始します。</li>
+              <li>ランク未登録の場合はランク登録フローが始まり、登録完了後に自動でエントリーされます。</li>
+              <li>ランク登録から 30 日以上経過している場合は、再登録フローが始まります。</li>
             </ul>
           </li>
           <li>「取り消し」を押すとエントリーを取り消せます。</li>
@@ -318,10 +318,10 @@
         <div>
           <h2>7. トークンの上書き</h2>
           <ul>
-            <li>起動メニューの <code>[3] トークンを上書きする</code> を選びます。</li>
+            <li>起動メニューで <code>[3] トークンを上書きする</code> を選びます。</li>
             <li>新しい <code>BOT_TOKEN</code> を入力すると、保存済みトークンが更新されます。</li>
-            <li>認証失敗時も、その場で新しい <code>BOT_TOKEN</code> を入力して再試行できます。</li>
-            <li>トークン値そのものを確認表示する機能はありません。</li>
+            <li>認証失敗時も、その場で新しい <code>BOT_TOKEN</code> を入力してそのまま再試行できます。</li>
+            <li>トークンの値を画面に表示する機能はありません。</li>
           </ul>
         </div>
       </section>
@@ -330,7 +330,7 @@
         <div>
           <h2>8. 終了方法</h2>
           <ul>
-            <li>ウィンドウを閉じるか、<code>Ctrl+C</code> を押してください。</li>
+            <li>ウィンドウを閉じるか、コンソールで <code>Ctrl+C</code> を押してください。</li>
           </ul>
         </div>
 
@@ -339,15 +339,15 @@
           <div class="panel-list">
             <div class="note danger">
               <strong>BOT_TOKEN が保存されていません</strong><br>
-              初回起動時の入力が完了していない可能性があります。<code>ow-custommatch-bot.exe</code> を起動し、案内に従ってトークンを入力してください。
+              初回起動時のトークン入力が完了していない可能性があります。<code>ow-custommatch-bot.exe</code> を起動し、案内に従ってトークンを入力してください。
             </div>
             <div class="note warn">
               <strong>別のトークンに変更したい</strong><br>
-              起動メニューの <code>[3] トークンを上書きする</code> を選び、新しいトークンを入力してください。
+              起動メニューで <code>[3] トークンを上書きする</code> を選び、新しいトークンを入力してください。
             </div>
             <div class="note warn">
               <strong>Authentication failed と表示された</strong><br>
-              画面に表示される <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Discord Developer Portal</a> を開き、<code>BOT TOKEN</code> を再発行または確認してください。案内に従って新しいトークンを入力すると、そのまま再試行できます。
+              <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Discord Developer Portal</a> を開き、<code>BOT TOKEN</code> を再発行または確認してください。画面の案内に従って新しいトークンを入力すると、そのままその場で再試行できます。
             </div>
             <div class="note danger">
               <strong>BOT_TOKEN の設定に失敗しました</strong><br>
@@ -362,11 +362,11 @@
         <div class="panel-list">
           <div class="note danger">
             <strong>failed to initialize bot</strong><br>
-            <code>%LOCALAPPDATA%\ow-custommatch-bot\</code> に書き込み権限があるか確認してください。
+            <code>%LOCALAPPDATA%\ow-custommatch-bot\</code> フォルダへの書き込み権限があるか確認してください。
           </div>
           <div class="note danger">
             <strong>スラッシュコマンドが表示されない</strong><br>
-            Bot 招待時に <code>applications.commands</code> スコープを付けたか確認してください。反映まで数分かかる場合があります。
+            Bot 招待時に <code>applications.commands</code> スコープを付けたか確認してください。コマンドの反映には数分かかる場合があります。
           </div>
         </div>
       </section>
