@@ -11,3 +11,6 @@
 # local scratch
 /.tmp/*
 !/.tmp/.gitkeep
+
+# playwright cli log
+.playwright-cli/
