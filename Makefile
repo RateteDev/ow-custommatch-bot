@@ -4,13 +4,11 @@ BIN_DIR := bin
 BIN_PATH := $(BIN_DIR)/$(APP_NAME)
 WIN_BIN_PATH := $(BIN_DIR)/$(APP_NAME).exe
 DIST_DIR := dist
-WIN_PACKAGE_NAME := $(APP_NAME)-win64
-WIN_PACKAGE_DIR := $(DIST_DIR)/$(WIN_PACKAGE_NAME)
-WIN_PACKAGE_ZIP := $(DIST_DIR)/$(WIN_PACKAGE_NAME).zip
+WIN_RELEASE_EXE := $(DIST_DIR)/$(APP_NAME).exe
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: test build run build-win package-win
+.PHONY: test build run build-win release-win-exe
 
 test:
 	go test ./...
@@ -26,13 +24,6 @@ build-win:
 	mkdir -p $(BIN_DIR)
 	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(WIN_BIN_PATH) $(CMD_PATH)
 
-package-win: build-win
-	test -f "LICENSE" || (echo "missing file: LICENSE" && exit 1)
+release-win-exe: build-win
 	mkdir -p $(DIST_DIR)
-	rm -rf "$(WIN_PACKAGE_DIR)" "$(WIN_PACKAGE_ZIP)"
-	mkdir -p "$(WIN_PACKAGE_DIR)"
-	cp "$(WIN_BIN_PATH)" "$(WIN_PACKAGE_DIR)/"
-	cp "LICENSE" "$(WIN_PACKAGE_DIR)/LICENSE"
-	command -v 7z >/dev/null 2>&1 || (echo "missing command: 7z" && exit 1)
-	cd "$(DIST_DIR)" && 7z a -tzip "$(WIN_PACKAGE_NAME).zip" "$(WIN_PACKAGE_NAME)"
-	rm -rf "$(WIN_PACKAGE_DIR)"
+	cp "$(WIN_BIN_PATH)" "$(WIN_RELEASE_EXE)"

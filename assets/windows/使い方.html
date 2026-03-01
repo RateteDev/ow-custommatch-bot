@@ -216,8 +216,9 @@
         <h2>1. セットアップ（利用者向け）</h2>
         <ol>
           <li>Discord Developer Portal でアプリケーションを作成し、Bot トークンを取得します。</li>
-          <li>実行ファイルと同じフォルダにある <code>.env</code> を開き、<code>BOT_TOKEN=</code> に取得したトークンを貼り付けます。</li>
-          <li><code>ow-custommatch-bot.exe</code> を起動します。</li>
+          <li>GitHub Release から <code>ow-custommatch-bot.exe</code> を取得します。配布物は exe 1 ファイルのみです。</li>
+          <li><code>ow-custommatch-bot.exe</code> を起動し、初回表示に従って <code>BOT_TOKEN</code> を入力します。</li>
+          <li>入力したトークンは Windows Credential Manager に保存されます。プレイヤー情報やログは <code>%LOCALAPPDATA%\ow-custommatch-bot\</code> 配下に保存されます。</li>
           <li>Discord サーバーに Bot を招待します。招待時のスコープは <code>bot</code> と <code>applications.commands</code> を選択してください。</li>
         </ol>
       </section>
@@ -311,12 +312,16 @@
         <h2>7. トラブルシュート</h2>
         <div class="panel-list">
           <div class="note danger">
-            <strong>failed to load env</strong><br>
-            実行ファイルと同じフォルダに <code>.env</code> があるか確認してください。
+            <strong>BOT_TOKEN が保存されていません</strong><br>
+            初回起動時の入力が完了していない可能性があります。<code>ow-custommatch-bot.exe</code> を起動し、案内に従ってトークンを入力してください。
           </div>
           <div class="note danger">
-            <strong>BOT_TOKEN is required</strong><br>
-            <code>.env</code> の <code>BOT_TOKEN</code> が空、または初期値のままになっていないか確認してください。
+            <strong>BOT_TOKEN の設定に失敗しました</strong><br>
+            Windows Credential Manager に保存できなかった可能性があります。再起動して入力し直してください。
+          </div>
+          <div class="note danger">
+            <strong>failed to initialize bot</strong><br>
+            <code>%LOCALAPPDATA%\ow-custommatch-bot\</code> に書き込み権限があるか確認してください。
           </div>
           <div class="note danger">
             <strong>スラッシュコマンドが表示されない</strong><br>
