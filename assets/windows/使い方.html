@@ -4,243 +4,465 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ow-custommatch-bot 使い方</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Bebas+Neue&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     :root {
-      color-scheme: light;
-      --bg: #f4f7fb;
-      --panel: #ffffff;
-      --panel-soft: #f8fbff;
-      --text: #1d2736;
-      --muted: #5e6b7d;
-      --line: #d8e1ec;
-      --accent: #1f6feb;
-      --accent-soft: #eaf2ff;
-      --warn: #8a4b00;
-      --warn-bg: #fff3df;
-      --danger: #9f2d2d;
-      --danger-bg: #fff0f0;
-      --shadow: 0 18px 42px rgba(30, 52, 84, 0.10);
-      --radius: 18px;
+      --bg:          #090b12;
+      --surface:     #0e1118;
+      --card:        #12151f;
+      --card-hover:  #171b27;
+      --border:      #1e2438;
+      --border-hi:   #2c3450;
+      --orange:      #f5821f;
+      --orange-dim:  #a85512;
+      --orange-glow: rgba(245, 130, 31, 0.18);
+      --cyan:        #38d9f5;
+      --cyan-glow:   rgba(56, 217, 245, 0.12);
+      --text:        #d6ddf0;
+      --text-hi:     #eef2ff;
+      --muted:       #4a5570;
+      --muted-hi:    #7080a0;
+      --warn:        #f5c442;
+      --warn-bg:     rgba(245, 196, 66, 0.08);
+      --warn-border: rgba(245, 196, 66, 0.25);
+      --danger:      #ff4f4f;
+      --danger-bg:   rgba(255, 79, 79, 0.08);
+      --danger-border: rgba(255, 79, 79, 0.25);
+      --info-bg:     rgba(56, 217, 245, 0.06);
+      --info-border: rgba(56, 217, 245, 0.2);
     }
 
-    * {
-      box-sizing: border-box;
-    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
 
     body {
-      margin: 0;
-      font-family: "Yu Gothic UI", "Meiryo", sans-serif;
-      background:
-        radial-gradient(circle at top right, #dcecff 0, rgba(220, 236, 255, 0) 36%),
-        linear-gradient(180deg, #eef4fb 0%, var(--bg) 100%);
+      font-family: "Noto Sans JP", sans-serif;
+      background-color: var(--bg);
       color: var(--text);
-      line-height: 1.7;
+      line-height: 1.75;
+      min-height: 100vh;
+      overflow-x: hidden;
     }
 
-    .container {
-      width: min(1040px, calc(100% - 32px));
+    /* ── Background grid ── */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(56, 217, 245, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(56, 217, 245, 0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(245,130,31,0.06) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 100% 100%, rgba(56,217,245,0.04) 0%, transparent 50%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .wrap {
+      position: relative;
+      z-index: 1;
+      width: min(1060px, calc(100% - 40px));
       margin: 0 auto;
-      padding: 40px 0 56px;
+      padding: 52px 0 72px;
     }
 
+    /* ── Hero ── */
     .hero {
-      background: linear-gradient(135deg, #17345f 0%, #2457a6 100%);
-      color: #fff;
-      border-radius: 28px;
-      padding: 36px;
-      box-shadow: var(--shadow);
+      position: relative;
+      padding: 44px 48px;
+      margin-bottom: 32px;
+      background: linear-gradient(135deg, #141926 0%, #0e1520 100%);
+      border: 1px solid var(--border-hi);
+      border-top: 2px solid var(--orange);
+      border-radius: 4px;
+      overflow: hidden;
+      animation: fadeUp 0.6s ease both;
+    }
+
+    .hero::before {
+      content: "OW";
+      position: absolute;
+      right: -20px;
+      top: -32px;
+      font-family: "Bebas Neue", sans-serif;
+      font-size: 200px;
+      color: rgba(245,130,31,0.04);
+      line-height: 1;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .hero-eyebrow {
+      font-family: "Barlow Condensed", sans-serif;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--orange);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .hero-eyebrow::after {
+      content: "";
+      flex: 1;
+      max-width: 60px;
+      height: 1px;
+      background: var(--orange-dim);
     }
 
     .hero h1 {
-      margin: 0 0 12px;
-      font-size: clamp(28px, 4vw, 40px);
-      line-height: 1.2;
+      font-family: "Barlow Condensed", sans-serif;
+      font-size: clamp(28px, 4vw, 44px);
+      font-weight: 900;
+      color: var(--text-hi);
+      line-height: 1.1;
+      margin-bottom: 14px;
+      letter-spacing: -0.01em;
+    }
+
+    .hero h1 span {
+      color: var(--orange);
     }
 
     .hero p {
-      margin: 0;
-      max-width: 720px;
-      color: rgba(255, 255, 255, 0.88);
+      font-size: 15px;
+      color: var(--muted-hi);
+      max-width: 600px;
     }
 
+    /* ── Grid ── */
     .grid {
       display: grid;
-      gap: 20px;
-      margin-top: 24px;
+      gap: 16px;
     }
 
+    .two-col {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 16px;
+    }
+
+    /* ── Card ── */
     .card {
-      background: var(--panel);
-      border: 1px solid rgba(216, 225, 236, 0.9);
-      border-radius: var(--radius);
-      padding: 28px;
-      box-shadow: var(--shadow);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 32px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.25s, background 0.25s, box-shadow 0.25s;
+      animation: fadeUp 0.5s ease both;
     }
 
+    .card:hover {
+      background: var(--card-hover);
+      border-color: var(--border-hi);
+      box-shadow: 0 0 0 1px rgba(245,130,31,0.08), 0 8px 40px rgba(0,0,0,0.4);
+    }
+
+    /* orange top accent bar */
+    .card::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--orange) 0%, transparent 100%);
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: transform 0.3s ease;
+    }
+
+    .card:hover::before { transform: scaleX(1); }
+
+    /* section number watermark */
+    .card-num {
+      position: absolute;
+      right: 20px;
+      top: 8px;
+      font-family: "Bebas Neue", sans-serif;
+      font-size: 96px;
+      line-height: 1;
+      color: rgba(245,130,31,0.055);
+      pointer-events: none;
+      user-select: none;
+    }
+
+    /* ── Section heading ── */
     h2 {
-      margin: 0 0 16px;
-      font-size: 22px;
-      line-height: 1.3;
+      font-family: "Barlow Condensed", sans-serif;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text-hi);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
 
-    h3 {
-      margin: 20px 0 10px;
-      font-size: 17px;
+    h2::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--border-hi);
     }
 
-    p, ul, ol {
-      margin: 0;
+    /* ── Ordered / Unordered lists ── */
+    ol { list-style: none; counter-reset: steps; padding: 0; }
+    ol li {
+      counter-increment: steps;
+      padding-left: 44px;
+      position: relative;
+      font-size: 14.5px;
+    }
+    ol li + li { margin-top: 14px; }
+    ol li::before {
+      content: counter(steps);
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 28px;
+      height: 28px;
+      background: var(--orange-glow);
+      border: 1px solid var(--orange-dim);
+      border-radius: 3px;
+      font-family: "Barlow Condensed", sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--orange);
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
 
-    ol, ul {
-      padding-left: 22px;
+    ul { list-style: none; padding: 0; }
+    ul li {
+      padding-left: 20px;
+      position: relative;
+      font-size: 14.5px;
+    }
+    ul li + li { margin-top: 10px; }
+    ul li::before {
+      content: "—";
+      position: absolute;
+      left: 0;
+      color: var(--orange);
+      font-size: 12px;
+      top: 2px;
     }
 
-    li + li {
+    /* nested ul inside ol */
+    ol li ul {
       margin-top: 10px;
     }
 
+    /* ── Code ── */
     code {
-      font-family: "Consolas", "Courier New", monospace;
-      font-size: 0.95em;
-      background: var(--panel-soft);
-      color: var(--accent);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 0.14em 0.45em;
+      font-family: "JetBrains Mono", "Consolas", monospace;
+      font-size: 0.85em;
+      background: rgba(56, 217, 245, 0.07);
+      color: var(--cyan);
+      border: 1px solid rgba(56, 217, 245, 0.15);
+      border-radius: 3px;
+      padding: 0.1em 0.45em;
     }
 
+    /* ── Links ── */
     a {
-      color: var(--accent);
-      text-decoration-thickness: 1.5px;
-      text-underline-offset: 0.16em;
+      color: var(--cyan);
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+      transition: color 0.2s;
     }
+    a:hover { color: #70e8ff; }
 
-    a:hover {
-      text-decoration-thickness: 2px;
-    }
-
-    table {
+    /* ── Command table ── */
+    .cmd-table {
       width: 100%;
       border-collapse: collapse;
-      overflow: hidden;
-      border-radius: 14px;
-      border: 1px solid var(--line);
-      background: var(--panel-soft);
-    }
-
-    th, td {
-      padding: 14px 16px;
-      text-align: left;
-      vertical-align: top;
-      border-bottom: 1px solid var(--line);
-    }
-
-    th {
-      width: 32%;
-      background: #edf4ff;
       font-size: 14px;
-      color: #2a4d81;
+    }
+    .cmd-table thead th {
+      text-align: left;
+      padding: 8px 14px;
+      font-family: "Barlow Condensed", sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border-hi);
+    }
+    .cmd-table tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background 0.15s;
+    }
+    .cmd-table tbody tr:last-child { border-bottom: none; }
+    .cmd-table tbody tr:hover { background: rgba(245,130,31,0.04); }
+    .cmd-table td {
+      padding: 13px 14px;
+      vertical-align: top;
+    }
+    .cmd-table td:first-child {
+      white-space: nowrap;
+      color: var(--cyan);
+    }
+    .cmd-table td code {
+      font-size: 0.9em;
     }
 
-    tr:last-child th,
-    tr:last-child td {
-      border-bottom: none;
-    }
-
-    .panel-list {
-      display: grid;
-      gap: 14px;
-    }
+    /* ── Info panels (note / warn / danger) ── */
+    .panel-list { display: grid; gap: 10px; }
 
     .note {
-      border-radius: 14px;
-      padding: 16px 18px;
-      border: 1px solid transparent;
+      padding: 14px 18px;
+      border-radius: 3px;
+      border-left: 3px solid;
+      font-size: 14px;
     }
-
+    .note.info {
+      background: var(--info-bg);
+      border-color: var(--cyan);
+      color: var(--text);
+    }
     .note.warn {
       background: var(--warn-bg);
-      border-color: #f1d19f;
-      color: var(--warn);
+      border-color: var(--warn);
+      color: #c8a83a;
     }
-
     .note.danger {
       background: var(--danger-bg);
-      border-color: #efc5c5;
-      color: var(--danger);
+      border-color: var(--danger);
+      color: #e06060;
     }
-
-    .two-column {
-      display: grid;
-      gap: 20px;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    .note strong {
+      display: block;
+      font-size: 13px;
+      letter-spacing: 0.03em;
+      margin-bottom: 4px;
     }
+    .note.info strong  { color: var(--cyan); }
+    .note.warn strong  { color: var(--warn); }
+    .note.danger strong { color: var(--danger); }
 
+    /* ── Inline badge ── */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-family: "Barlow Condensed", sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 2px;
+    }
+    .badge-orange { background: var(--orange-glow); color: var(--orange); border: 1px solid var(--orange-dim); }
+    .badge-cyan   { background: var(--cyan-glow);   color: var(--cyan);   border: 1px solid rgba(56,217,245,0.2); }
+
+    /* ── Footer ── */
     .meta {
-      margin-top: 24px;
+      margin-top: 28px;
+      font-size: 12px;
       color: var(--muted);
-      font-size: 14px;
       text-align: center;
+      letter-spacing: 0.05em;
     }
 
-    @media (max-width: 720px) {
-      .container {
-        width: min(100% - 20px, 1040px);
-        padding: 20px 0 36px;
-      }
+    /* ── Animations ── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
 
-      .hero,
-      .card {
-        padding: 22px;
-      }
+    .card:nth-child(1)  { animation-delay: 0.05s; }
+    .card:nth-child(2)  { animation-delay: 0.10s; }
+    .card:nth-child(3)  { animation-delay: 0.15s; }
+    .card:nth-child(4)  { animation-delay: 0.20s; }
+    .card:nth-child(5)  { animation-delay: 0.25s; }
+    .card:nth-child(6)  { animation-delay: 0.30s; }
+    .card:nth-child(7)  { animation-delay: 0.35s; }
 
-      table, thead, tbody, tr, th, td {
-        display: block;
-      }
-
-      th, td {
-        width: 100%;
-      }
-
-      th {
-        border-bottom: none;
-        padding-bottom: 6px;
-      }
-
-      td {
-        padding-top: 0;
-      }
+    /* ── Responsive ── */
+    @media (max-width: 680px) {
+      .wrap { padding: 28px 0 48px; }
+      .hero { padding: 28px 24px; }
+      .card { padding: 24px 20px; }
+      .hero::before { font-size: 120px; }
+      .card-num { font-size: 64px; }
     }
   </style>
 </head>
 <body>
-  <main class="container">
+  <main class="wrap">
+
+    <!-- ── HERO ── -->
     <section class="hero">
-      <h1>ow-custommatch-bot 使い方</h1>
-      <p>Discord 上でカスタムマッチの募集・ランク登録・チーム振り分けを行うための利用ガイドです。初回セットアップから募集の流れ、よくあるエラーへの対処まとめています。</p>
+      <div class="hero-eyebrow">利用ガイド</div>
+      <h1>OW CUSTOMMATCH<br><span>BOT</span> 使い方</h1>
+      <p>Discord 上でカスタムマッチの募集・ランク登録・チーム振り分けを行うための利用ガイドです。初回セットアップから募集の流れ、よくあるエラーへの対処までまとめています。</p>
     </section>
 
     <div class="grid">
+
+      <!-- ── 1. セットアップ ── -->
       <section class="card">
-        <h2>1. セットアップ（利用者向け）</h2>
+        <div class="card-num">1</div>
+        <h2>セットアップ</h2>
         <ol>
-          <li><a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Discord Developer Portal</a> でアプリケーションを作成し、Bot トークンを取得します。</li>
-          <li>GitHub Release から <code>ow-custommatch-bot.exe</code> をダウンロードします。配布物は exe 1 ファイルのみです。</li>
-          <li><code>ow-custommatch-bot.exe</code> を起動し、画面の案内に従って <code>BOT_TOKEN</code> を入力します。</li>
-          <li>入力したトークンは Windows Credential Manager の <code>ow-custommatch-bot/BOT_TOKEN</code> に保存されます。プレイヤー情報やログは <code>%LOCALAPPDATA%\ow-custommatch-bot\</code> 配下に保存されます。</li>
-          <li>Discord サーバーに Bot を招待します。招待時のスコープは <code>bot</code> と <code>applications.commands</code> を選択してください。</li>
+          <li>
+            <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Discord Developer Portal</a>
+            でアプリケーションを作成し、Bot トークンを取得します。
+          </li>
+          <li>
+            GitHub Release から <code>ow-custommatch-bot.exe</code> をダウンロードします。配布物は exe 1 ファイルのみです。
+          </li>
+          <li>
+            <code>ow-custommatch-bot.exe</code> を起動し、画面の案内に従って <code>BOT_TOKEN</code> を入力します。
+          </li>
+          <li>
+            入力したトークンは Windows Credential Manager の <code>ow-custommatch-bot/BOT_TOKEN</code> に保存されます。
+            プレイヤー情報やログは <code>%LOCALAPPDATA%\ow-custommatch-bot\</code> 配下に保存されます。
+          </li>
+          <li>
+            Discord サーバーに Bot を招待します。招待時のスコープは <code>bot</code> と <code>applications.commands</code> を選択してください。
+          </li>
         </ol>
       </section>
 
+      <!-- ── 2. コマンド一覧 ── -->
       <section class="card">
-        <h2>2. コマンド一覧</h2>
-        <table>
-          <tbody>
+        <div class="card-num">2</div>
+        <h2>コマンド一覧</h2>
+        <table class="cmd-table">
+          <thead>
             <tr>
               <th>コマンド</th>
               <th>説明</th>
             </tr>
+          </thead>
+          <tbody>
             <tr>
               <td><code>/match</code></td>
               <td>マッチング募集を開始します。募集の開始操作は発案者のみが行います。</td>
@@ -257,8 +479,10 @@
         </table>
       </section>
 
+      <!-- ── 3. /match フロー ── -->
       <section class="card">
-        <h2>3. <code>/match</code> の操作フロー</h2>
+        <div class="card-num">3</div>
+        <h2><code>/match</code> の操作フロー</h2>
         <ol>
           <li>発案者が <code>/match</code> を実行すると、募集パネルが投稿されます。</li>
           <li>同じチャンネルにすでに募集が開いている場合は、現在の募集を閉じて新しく始めるか、そのままキャンセルするかを選べます。</li>
@@ -274,103 +498,115 @@
         </ol>
       </section>
 
-      <section class="card two-column">
-        <div>
-          <h2>4. ランク登録について</h2>
+      <!-- ── 4 & 5. ランク / チーム分け ── -->
+      <div class="two-col">
+        <section class="card">
+          <div class="card-num">4</div>
+          <h2>ランク登録</h2>
           <div class="panel-list">
             <div class="note warn">
               エントリー時または <code>/register_rank</code> コマンドで登録できます。
             </div>
-            <div class="note">
+            <div class="note info">
               ランクとディビジョン（1〜5）を選択します。<code>Top 500</code> はディビジョン選択が不要です。
             </div>
-            <div class="note">
+            <div class="note info">
               登録は 30 日間有効です。期限切れの場合は次回エントリー時に再登録を求められます。
             </div>
           </div>
-        </div>
+        </section>
 
-        <div>
-          <h2>5. チーム分けの仕組み</h2>
+        <section class="card">
+          <div class="card-num">5</div>
+          <h2>チーム分け</h2>
           <div class="panel-list">
-            <div class="note">
+            <div class="note info">
               5 の倍数人数でチームを編成します。端数は「余りメンバー」として別表示されます。
             </div>
-            <div class="note">
+            <div class="note info">
               ランクスコアを基準に、できるだけバランスが取れるよう振り分けます。
             </div>
-            <div class="note">
+            <div class="note info">
               「再振り分け」を押すことで、何度でも再抽選できます。
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
 
-      <section class="card two-column">
-        <div>
-          <h2>6. 注意事項</h2>
+      <!-- ── 6 & 7. 注意事項 / トークン ── -->
+      <div class="two-col">
+        <section class="card">
+          <div class="card-num">6</div>
+          <h2>注意事項</h2>
           <ul>
             <li>1 チャンネルにつき同時に開ける募集は 1 つのみです。</li>
             <li>「振り分け」「中止」を実行できるのは発案者のみです。</li>
           </ul>
-        </div>
+        </section>
 
-        <div>
-          <h2>7. トークンの上書き</h2>
+        <section class="card">
+          <div class="card-num">7</div>
+          <h2>トークンの上書き</h2>
           <ul>
             <li>起動メニューで <code>[3] トークンを上書きする</code> を選びます。</li>
             <li>新しい <code>BOT_TOKEN</code> を入力すると、保存済みトークンが更新されます。</li>
             <li>認証失敗時も、その場で新しい <code>BOT_TOKEN</code> を入力してそのまま再試行できます。</li>
             <li>トークンの値を画面に表示する機能はありません。</li>
           </ul>
-        </div>
-      </section>
+        </section>
+      </div>
 
-      <section class="card two-column">
-        <div>
-          <h2>8. 終了方法</h2>
+      <!-- ── 8 & 9. 終了 / トラブルシュート ── -->
+      <div class="two-col">
+        <section class="card">
+          <div class="card-num">8</div>
+          <h2>終了方法</h2>
           <ul>
             <li>ウィンドウを閉じるか、コンソールで <code>Ctrl+C</code> を押してください。</li>
           </ul>
-        </div>
+        </section>
 
-        <div>
-          <h2>9. トラブルシュート</h2>
+        <section class="card">
+          <div class="card-num">9</div>
+          <h2>トラブルシュート</h2>
           <div class="panel-list">
             <div class="note danger">
-              <strong>BOT_TOKEN が保存されていません</strong><br>
+              <strong>BOT_TOKEN が保存されていません</strong>
               初回起動時のトークン入力が完了していない可能性があります。<code>ow-custommatch-bot.exe</code> を起動し、案内に従ってトークンを入力してください。
             </div>
             <div class="note warn">
-              <strong>別のトークンに変更したい</strong><br>
+              <strong>別のトークンに変更したい</strong>
               起動メニューで <code>[3] トークンを上書きする</code> を選び、新しいトークンを入力してください。
             </div>
             <div class="note warn">
-              <strong>Authentication failed と表示された</strong><br>
+              <strong>Authentication failed と表示された</strong>
               <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Discord Developer Portal</a> を開き、<code>BOT TOKEN</code> を再発行または確認してください。画面の案内に従って新しいトークンを入力すると、そのままその場で再試行できます。
             </div>
             <div class="note danger">
-              <strong>BOT_TOKEN の設定に失敗しました</strong><br>
+              <strong>BOT_TOKEN の設定に失敗しました</strong>
               Windows Credential Manager に保存できなかった可能性があります。詳しい手順は <a href="https://ratetedev.github.io/ow-custommatch-bot/" target="_blank" rel="noreferrer">使い方ページ</a> をご確認ください。
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
 
+      <!-- ── 10. 補足トラブルシュート ── -->
       <section class="card">
-        <h2>10. 補足トラブルシュート</h2>
+        <div class="card-num">10</div>
+        <h2>補足トラブルシュート</h2>
         <div class="panel-list">
           <div class="note danger">
-            <strong>failed to initialize bot</strong><br>
+            <strong>failed to initialize bot</strong>
             <code>%LOCALAPPDATA%\ow-custommatch-bot\</code> フォルダへの書き込み権限があるか確認してください。
           </div>
           <div class="note danger">
-            <strong>スラッシュコマンドが表示されない</strong><br>
+            <strong>スラッシュコマンドが表示されない</strong>
             Bot 招待時に <code>applications.commands</code> スコープを付けたか確認してください。コマンドの反映には数分かかる場合があります。
           </div>
         </div>
       </section>
-    </div>
+
+    </div><!-- /grid -->
 
     <p class="meta">このファイルは単体で閲覧できるよう、スタイルをすべてインラインで定義しています。</p>
   </main>
