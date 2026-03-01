@@ -20,6 +20,7 @@ type Bot struct {
 	players              *model.PlayerDataManager
 	rankData             model.RankDataFile
 	vcConfig             *model.VCConfigManager
+	recruitmentsMu       sync.RWMutex
 	recruitments         map[string]*model.Recruitment
 	pendingRegistrations map[string]pendingRegEntry
 	testDummies          map[string]map[string]model.PlayerInfo
@@ -169,23 +170,60 @@ func (b *Bot) onInteractionCreate(s *discordgo.Session, i *discordgo.Interaction
 	}
 }
 
+func (b *Bot) getRecruitment(channelID string) (*model.Recruitment, bool) {
+	b.recruitmentsMu.RLock()
+	defer b.recruitmentsMu.RUnlock()
+
+	r, ok := b.recruitments[channelID]
+	return r, ok
+}
+
+func (b *Bot) setRecruitment(channelID string, r *model.Recruitment) {
+	b.recruitmentsMu.Lock()
+	defer b.recruitmentsMu.Unlock()
+
+	b.recruitments[channelID] = r
+}
+
+func (b *Bot) deleteRecruitment(channelID string) {
+	b.recruitmentsMu.Lock()
+	defer b.recruitmentsMu.Unlock()
+
+	delete(b.recruitments, channelID)
+}
+
+func (b *Bot) startRecruitment(guildID, channelID, organizerID string) (*model.Recruitment, bool) {
+	b.recruitmentsMu.Lock()
+	defer b.recruitmentsMu.Unlock()
+
+	if r, ok := b.recruitments[channelID]; ok && r.IsOpen {
+		return r, false
+	}
+
+	r := model.NewRecruitment(b.rankData)
+	r.OrganizerID = organizerID
+	r.ChannelID = channelID
+	r.GuildID = guildID
+	r.IsOpen = true
+	b.recruitments[channelID] = r
+
+	if b.testDummies != nil {
+		b.testDummies[channelID] = make(map[string]model.PlayerInfo)
+	}
+
+	return r, true
+}
+
 func (b *Bot) handleMatchStart(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	channelID := i.ChannelID
-	if r, ok := b.recruitments[channelID]; ok && r.IsOpen {
+	userID, _ := interactionUser(i)
+	r, started := b.startRecruitment(i.GuildID, channelID, userID)
+	if !started {
 		if err := b.respondEphemeralText(s, i, "このチャンネルでは既に募集が開始されています"); err != nil {
 			log.Printf("failed to respond match start conflict: %v", err)
 		}
 		return
 	}
-
-	userID, _ := interactionUser(i)
-	r := model.NewRecruitment(b.rankData)
-	r.OrganizerID = userID
-	r.ChannelID = channelID
-	r.GuildID = i.GuildID
-	r.IsOpen = true
-	b.recruitments[channelID] = r
-	b.testDummies[channelID] = make(map[string]model.PlayerInfo)
 
 	if os.Getenv("OW_CUSTOMMATCH_BOT_TEST_MODE") == "true" && matchStartFillMode(i) {
 		b.injectTestDummies(channelID, r)
@@ -213,7 +251,7 @@ func (b *Bot) handleMatchStart(s *discordgo.Session, i *discordgo.InteractionCre
 
 func (b *Bot) handleEntry(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	channelID := i.ChannelID
-	r, ok := b.recruitments[channelID]
+	r, ok := b.getRecruitment(channelID)
 	if !ok || !r.IsOpen {
 		if err := b.respondEphemeralText(s, i, "募集は終了しています"); err != nil {
 			log.Printf("failed to respond closed recruitment on entry: %v", err)
@@ -288,7 +326,7 @@ func (b *Bot) handleRankSelect(s *discordgo.Session, i *discordgo.InteractionCre
 		}
 		delete(b.pendingRegistrations, userID)
 		if entry.autoEntry {
-			r, ok := b.recruitments[entry.channelID]
+			r, ok := b.getRecruitment(entry.channelID)
 			if !ok || !r.IsOpen {
 				_ = b.updateComponentWithText(s, i, "募集は終了しています")
 				return
@@ -346,7 +384,7 @@ func (b *Bot) handleDivisionSelect(s *discordgo.Session, i *discordgo.Interactio
 	delete(b.pendingRegistrations, userID)
 
 	if entry.autoEntry {
-		r, ok := b.recruitments[entry.channelID]
+		r, ok := b.getRecruitment(entry.channelID)
 		if !ok || !r.IsOpen {
 			if err := b.updateComponentWithText(s, i, "募集は終了しています"); err != nil {
 				log.Printf("failed to respond closed recruitment on pending division select: %v", err)
@@ -423,7 +461,7 @@ func (b *Bot) handleMyRank(s *discordgo.Session, i *discordgo.InteractionCreate)
 
 func (b *Bot) handleCancelEntry(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	channelID := i.ChannelID
-	r, ok := b.recruitments[channelID]
+	r, ok := b.getRecruitment(channelID)
 	if !ok || !r.IsOpen {
 		if err := b.respondEphemeralText(s, i, "募集は終了しています"); err != nil {
 			log.Printf("failed to respond closed recruitment on cancel entry: %v", err)
@@ -454,7 +492,7 @@ func (b *Bot) handleCancelEntry(s *discordgo.Session, i *discordgo.InteractionCr
 
 func (b *Bot) handleAssign(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	channelID := i.ChannelID
-	r, ok := b.recruitments[channelID]
+	r, ok := b.getRecruitment(channelID)
 	if !ok || !r.IsOpen {
 		if err := b.respondEphemeralText(s, i, "募集は終了しています"); err != nil {
 			log.Printf("failed to respond closed recruitment on assign: %v", err)
@@ -748,7 +786,7 @@ func (b *Bot) ensureVCChannels(s *discordgo.Session, guildID string, teamCount i
 
 func (b *Bot) handleCancel(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	channelID := i.ChannelID
-	r, ok := b.recruitments[channelID]
+	r, ok := b.getRecruitment(channelID)
 	if !ok || !r.IsOpen {
 		if err := b.respondEphemeralText(s, i, "募集は終了しています"); err != nil {
 			log.Printf("failed to respond closed recruitment on cancel: %v", err)

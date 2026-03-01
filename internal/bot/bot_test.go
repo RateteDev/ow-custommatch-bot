@@ -3,6 +3,7 @@ package bot
 import (
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -158,6 +159,139 @@ func TestBuildRecruitComponentsAssignButtonDisabledByEntryCount(t *testing.T) {
 			t.Fatalf("assign button should be enabled when entries are 10 or more")
 		}
 	})
+}
+
+func TestStartRecruitmentKeepsStatePerChannelWithinSameGuild(t *testing.T) {
+	rankData, err := model.LoadEmbeddedRankData()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedRankData failed: %v", err)
+	}
+
+	b := &Bot{
+		rankData:     rankData,
+		recruitments: make(map[string]*model.Recruitment),
+		testDummies:  make(map[string]map[string]model.PlayerInfo),
+	}
+
+	first, started := b.startRecruitment("guild-1", "channel-1", "user-1")
+	if !started {
+		t.Fatalf("first recruitment should start")
+	}
+	second, started := b.startRecruitment("guild-1", "channel-2", "user-2")
+	if !started {
+		t.Fatalf("second recruitment in another channel should start")
+	}
+
+	if first == second {
+		t.Fatalf("recruitments in different channels should be distinct")
+	}
+
+	gotFirst, ok := b.getRecruitment("channel-1")
+	if !ok || gotFirst != first {
+		t.Fatalf("channel-1 recruitment = %v, %v; want first recruitment", gotFirst, ok)
+	}
+	gotSecond, ok := b.getRecruitment("channel-2")
+	if !ok || gotSecond != second {
+		t.Fatalf("channel-2 recruitment = %v, %v; want second recruitment", gotSecond, ok)
+	}
+
+	if gotFirst.GuildID != "guild-1" || gotSecond.GuildID != "guild-1" {
+		t.Fatalf("guild ids should be preserved: first=%q second=%q", gotFirst.GuildID, gotSecond.GuildID)
+	}
+}
+
+func TestStartRecruitmentPreventsDuplicateOpenRecruitmentInSameChannel(t *testing.T) {
+	rankData, err := model.LoadEmbeddedRankData()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedRankData failed: %v", err)
+	}
+
+	b := &Bot{
+		rankData:     rankData,
+		recruitments: make(map[string]*model.Recruitment),
+		testDummies:  make(map[string]map[string]model.PlayerInfo),
+	}
+
+	first, started := b.startRecruitment("guild-1", "channel-1", "user-1")
+	if !started {
+		t.Fatalf("initial recruitment should start")
+	}
+
+	second, started := b.startRecruitment("guild-1", "channel-1", "user-2")
+	if started {
+		t.Fatalf("duplicate recruitment in same channel should not start")
+	}
+	if second != first {
+		t.Fatalf("duplicate start should return existing recruitment")
+	}
+
+	got, ok := b.getRecruitment("channel-1")
+	if !ok {
+		t.Fatalf("channel-1 recruitment should still exist")
+	}
+	if got.OrganizerID != "user-1" {
+		t.Fatalf("organizer should remain unchanged, got %q", got.OrganizerID)
+	}
+}
+
+func TestStartRecruitmentIsAtomicPerChannel(t *testing.T) {
+	rankData, err := model.LoadEmbeddedRankData()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedRankData failed: %v", err)
+	}
+
+	b := &Bot{
+		rankData:     rankData,
+		recruitments: make(map[string]*model.Recruitment),
+		testDummies:  make(map[string]map[string]model.PlayerInfo),
+	}
+
+	const workers = 8
+	var wg sync.WaitGroup
+	startedCount := 0
+	var startedMu sync.Mutex
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if _, started := b.startRecruitment("guild-1", "channel-1", teamLabel(i)); started {
+				startedMu.Lock()
+				startedCount++
+				startedMu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	if startedCount != 1 {
+		t.Fatalf("startedCount = %d, want 1", startedCount)
+	}
+
+	got, ok := b.getRecruitment("channel-1")
+	if !ok || got == nil || !got.IsOpen {
+		t.Fatalf("channel-1 recruitment should exist and stay open")
+	}
+}
+
+func TestRecruitmentAccessorsSetGetDelete(t *testing.T) {
+	b := &Bot{
+		recruitments: make(map[string]*model.Recruitment),
+	}
+	r := &model.Recruitment{ChannelID: "channel-1", IsOpen: true}
+
+	b.setRecruitment("channel-1", r)
+
+	got, ok := b.getRecruitment("channel-1")
+	if !ok || got != r {
+		t.Fatalf("getRecruitment() = %v, %v; want %v, true", got, ok, r)
+	}
+
+	b.deleteRecruitment("channel-1")
+
+	if got, ok := b.getRecruitment("channel-1"); ok || got != nil {
+		t.Fatalf("after delete getRecruitment() = %v, %v; want nil, false", got, ok)
+	}
 }
 
 func TestTeamAverageScore(t *testing.T) {
