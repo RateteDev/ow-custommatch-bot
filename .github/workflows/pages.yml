@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'assets/windows/使い方.html'
+      - 'assets/使い方.html'
 
 permissions:
   contents: read
@@ -23,7 +23,7 @@ jobs:
       - name: Prepare pages content
         run: |
           mkdir -p _site
-          cp 'assets/windows/使い方.html' _site/index.html
+          cp 'assets/使い方.html' _site/index.html
 
       - uses: actions/configure-pages@v4
 
