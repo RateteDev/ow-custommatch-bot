@@ -15,16 +15,13 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install 7z
-        run: sudo apt-get install -y p7zip-full
-
       - name: Test
         run: go test ./...
 
-      - name: Package Windows
-        run: make package-win VERSION=${{ github.ref_name }}
+      - name: Build Windows exe
+        run: make release-win-exe VERSION=${{ github.ref_name }}
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/ow-custommatch-bot-win64.zip
+          files: dist/ow-custommatch-bot.exe
