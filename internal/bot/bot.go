@@ -123,7 +123,12 @@ func (b *Bot) registerCommands() error {
 		Description: "チーム分けに使用するランクを登録・更新します",
 	}
 
-	_, err := b.session.ApplicationCommandBulkOverwrite(appID, "", []*discordgo.ApplicationCommand{matchCmd, registerRankCmd})
+	myRankCmd := &discordgo.ApplicationCommand{
+		Name:        "my_rank",
+		Description: "登録済みのランク情報を確認します",
+	}
+
+	_, err := b.session.ApplicationCommandBulkOverwrite(appID, "", []*discordgo.ApplicationCommand{matchCmd, registerRankCmd, myRankCmd})
 	return err
 }
 
@@ -143,6 +148,8 @@ func (b *Bot) onInteractionCreate(s *discordgo.Session, i *discordgo.Interaction
 			b.handleMatchStart(s, i)
 		case "register_rank":
 			b.handleRegisterRank(s, i)
+		case "my_rank":
+			b.handleMyRank(s, i)
 		}
 	case discordgo.InteractionMessageComponent:
 		switch i.MessageComponentData().CustomID {
@@ -365,6 +372,55 @@ func (b *Bot) handleRegisterRank(s *discordgo.Session, i *discordgo.InteractionC
 	}
 }
 
+func (b *Bot) handleMyRank(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	userID, _ := interactionUser(i)
+	player := b.players.GetByID(userID)
+
+	if player == nil || player.HighestRank.Rank == "" {
+		_ = b.respondEphemeralText(s, i, "ランクが登録されていません。エントリー時または /register_rank で登録できます。")
+		return
+	}
+
+	rankLabel := player.HighestRank.Rank
+	if player.HighestRank.Division != "" {
+		rankLabel += " " + player.HighestRank.Division
+	}
+
+	registeredAt, err := time.Parse(time.RFC3339, player.RankUpdatedAt)
+	if err != nil {
+		_ = b.respondEphemeralText(s, i, "ランク登録日時の読み込みに失敗しました。/register_rank で再登録してください。")
+		return
+	}
+	expiryDate := registeredAt.Add(rankRegistrationValidDuration).Format("2006/01/02")
+
+	expiredMsg := ""
+	if b.isRankRegistrationExpired(player) {
+		expiredMsg = "\n⚠️ 有効期限が切れています。次回エントリー時に再登録が必要です。"
+	}
+
+	description := fmt.Sprintf(
+		"ランク: **%s**\n登録日: %s\n有効期限: %s%s",
+		rankLabel,
+		registeredAt.Format("2006/01/02"),
+		expiryDate,
+		expiredMsg,
+	)
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "📊 ランク情報",
+		Description: description,
+		Color:       0x3498DB,
+	}
+
+	_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+			Flags:  discordgo.MessageFlagsEphemeral,
+		},
+	})
+}
+
 func (b *Bot) handleCancelEntry(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	channelID := i.ChannelID
 	r, ok := b.recruitments[channelID]
@@ -471,8 +527,9 @@ func (b *Bot) handleAssign(s *discordgo.Session, i *discordgo.InteractionCreate)
 		if value == "" {
 			value = "（なし）"
 		}
+		avgScore := teamAverageScore(team)
 		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   "チーム" + teamLabel(idx),
+			Name:   fmt.Sprintf("チーム%s（平均スコア: %.0f）", teamLabel(idx), avgScore),
 			Value:  value,
 			Inline: true,
 		})
@@ -757,6 +814,10 @@ func buildRecruitEmbed(r *model.Recruitment, title string, color int) *discordgo
 		entryCount = len(r.Entries)
 		participants = recruitParticipantList(r)
 	}
+	entryLabel := fmt.Sprintf("参加者（%d人 / 振り分けには10人以上必要）", entryCount)
+	if entryCount >= 10 {
+		entryLabel = fmt.Sprintf("参加者（%d人 / 振り分け可能✅）", entryCount)
+	}
 
 	return &discordgo.MessageEmbed{
 		Title:       title,
@@ -764,7 +825,7 @@ func buildRecruitEmbed(r *model.Recruitment, title string, color int) *discordgo
 		Color:       color,
 		Fields: []*discordgo.MessageEmbedField{
 			{
-				Name:  fmt.Sprintf("参加者（%d人）", entryCount),
+				Name:  entryLabel,
 				Value: participants,
 			},
 		},
@@ -815,7 +876,7 @@ func (b *Bot) buildRecruitComponents(r *model.Recruitment, disabled bool) []disc
 					Label:    assignLabel,
 					CustomID: "assign",
 					Style:    discordgo.DangerButton,
-					Disabled: disabled,
+					Disabled: disabled || r == nil || len(r.Entries) < 10,
 				},
 				discordgo.Button{
 					Label:    "🚫 中止",
@@ -826,6 +887,17 @@ func (b *Bot) buildRecruitComponents(r *model.Recruitment, disabled bool) []disc
 			},
 		},
 	}
+}
+
+func teamAverageScore(team []model.ScoredPlayer) float64 {
+	if len(team) == 0 {
+		return 0
+	}
+	total := 0.0
+	for _, p := range team {
+		total += p.Score
+	}
+	return total / float64(len(team))
 }
 
 func (b *Bot) startRankRegistrationFlow(s *discordgo.Session, i *discordgo.InteractionCreate, promptType rankRegistrationPromptType, autoEntry bool) error {
