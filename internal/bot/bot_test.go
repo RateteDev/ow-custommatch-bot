@@ -312,6 +312,40 @@ func TestTeamAverageScore(t *testing.T) {
 	})
 }
 
+func TestBuildAssignEmbedTeamFieldLayout(t *testing.T) {
+	teams := [][]model.ScoredPlayer{
+		{
+			{ID: "user-1", Score: 3000},
+			{ID: "user-2", Score: 2880},
+		},
+	}
+	embed := buildAssignEmbed(teams, []string{"https://discord.gg/team-a"}, nil, false)
+
+	if len(embed.Fields) != 1 {
+		t.Fatalf("len(embed.Fields) = %d, want 1", len(embed.Fields))
+	}
+
+	field := embed.Fields[0]
+	if field.Name != "チームA" {
+		t.Fatalf("field.Name = %q, want %q", field.Name, "チームA")
+	}
+	if strings.Contains(field.Name, "平均スコア") {
+		t.Fatalf("field.Name = %q, want not to contain %q", field.Name, "平均スコア")
+	}
+	if !strings.HasPrefix(field.Value, "平均スコア: 2940\n") {
+		t.Fatalf("field.Value = %q, want prefix %q", field.Value, "平均スコア: 2940\n")
+	}
+	if !strings.Contains(field.Value, "<@user-1>\n<@user-2>") {
+		t.Fatalf("field.Value = %q, want member list", field.Value)
+	}
+	if !strings.Contains(field.Value, "[📢 VCに参加](https://discord.gg/team-a)") {
+		t.Fatalf("field.Value = %q, want vc link", field.Value)
+	}
+	if !field.Inline {
+		t.Fatalf("field.Inline = %v, want true", field.Inline)
+	}
+}
+
 func findAssignButton(t *testing.T, components []discordgo.MessageComponent) discordgo.Button {
 	t.Helper()
 
