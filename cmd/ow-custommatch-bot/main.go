@@ -5,8 +5,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -33,6 +33,7 @@ const botTokenPlaceholder = "YOUR_DISCORD_BOT_TOKEN"
 type cliOptions struct {
 	showHelp    bool
 	showVersion bool
+	testMode    bool
 }
 
 type requiredEnvErr string
@@ -52,14 +53,14 @@ func (a ansiStyle) paint(code, s string) string {
 	return "\x1b[" + code + "m" + s + "\x1b[0m"
 }
 
-func (a ansiStyle) bold(s string) string      { return a.paint("1", s) }
-func (a ansiStyle) dim(s string) string       { return a.paint("2", s) }
-func (a ansiStyle) cyan(s string) string      { return a.paint("36", s) }
-func (a ansiStyle) blue(s string) string      { return a.paint("34", s) }
-func (a ansiStyle) green(s string) string     { return a.paint("32", s) }
-func (a ansiStyle) yellow(s string) string    { return a.paint("33", s) }
-func (a ansiStyle) red(s string) string       { return a.paint("31", s) }
-func (a ansiStyle) magenta(s string) string   { return a.paint("35", s) }
+func (a ansiStyle) bold(s string) string        { return a.paint("1", s) }
+func (a ansiStyle) dim(s string) string         { return a.paint("2", s) }
+func (a ansiStyle) cyan(s string) string        { return a.paint("36", s) }
+func (a ansiStyle) blue(s string) string        { return a.paint("34", s) }
+func (a ansiStyle) green(s string) string       { return a.paint("32", s) }
+func (a ansiStyle) yellow(s string) string      { return a.paint("33", s) }
+func (a ansiStyle) red(s string) string         { return a.paint("31", s) }
+func (a ansiStyle) magenta(s string) string     { return a.paint("35", s) }
 func (a ansiStyle) whiteOnBlue(s string) string { return a.paint("37;44", s) }
 
 type startupUI struct {
@@ -374,6 +375,72 @@ func requiredEnv(key string) (string, error) {
 	return value, nil
 }
 
+func promptBotToken(ui startupUI, stdin io.Reader) (string, error) {
+	fmt.Fprint(ui.out, "  BOT_TOKEN を入力してください: ")
+	line, err := bufio.NewReader(stdin).ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", fmt.Errorf("read token: %w", err)
+	}
+	token := strings.TrimSpace(line)
+	if token == "" || strings.EqualFold(token, botTokenPlaceholder) {
+		return "", fmt.Errorf("トークンが入力されませんでした")
+	}
+	return token, nil
+}
+
+func promptStartupMode(ui startupUI, stdin io.Reader, timeout time.Duration) bool {
+	fmt.Fprintln(ui.out)
+	fmt.Fprintln(ui.out, ui.style.bold("  起動モードを選択してください"))
+	fmt.Fprintln(ui.out, "    [1] 本番モード  (デフォルト)")
+	fmt.Fprintln(ui.out, "    [2] テストモード")
+	fmt.Fprintf(ui.out, "  %d秒後に [1] で自動起動します。> ", int(timeout.Seconds()))
+
+	ch := make(chan string, 1)
+	go func() {
+		scanner := bufio.NewScanner(stdin)
+		if scanner.Scan() {
+			ch <- strings.TrimSpace(scanner.Text())
+		}
+		close(ch)
+	}()
+
+	select {
+	case input, ok := <-ch:
+		fmt.Fprintln(ui.out)
+		return ok && input == "2"
+	case <-time.After(timeout):
+		fmt.Fprintln(ui.out)
+		return false
+	}
+}
+
+func saveTokenToEnv(envPath, token string) error {
+	existing, err := os.ReadFile(envPath)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read env file: %w", err)
+	}
+	line := "BOT_TOKEN=" + token
+	if len(existing) == 0 {
+		return os.WriteFile(envPath, []byte(line+"\n"), 0o644)
+	}
+	content := strings.TrimRight(string(existing), "\n")
+	lines := strings.Split(content, "\n")
+	found := false
+	for i, l := range lines {
+		key, _, ok := strings.Cut(strings.TrimSpace(l), "=")
+		if ok && strings.TrimSpace(key) == "BOT_TOKEN" {
+			lines[i] = line
+			found = true
+			break
+		}
+	}
+	if !found {
+		lines = append(lines, line)
+	}
+	content = strings.Join(lines, "\n")
+	return os.WriteFile(envPath, []byte(content+"\n"), 0o644)
+}
+
 func setupLogger(exeDir string) (*os.File, string, error) {
 	logDir := filepath.Join(exeDir, ".logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
@@ -405,6 +472,7 @@ func parseCLIArgs(args []string) (cliOptions, error) {
 	fs.BoolVar(&opts.showHelp, "help", false, "show help")
 	fs.BoolVar(&opts.showHelp, "h", false, "show help")
 	fs.BoolVar(&opts.showVersion, "version", false, "show version")
+	fs.BoolVar(&opts.testMode, "test", false, "テストモードで起動")
 	if err := fs.Parse(args); err != nil {
 		return cliOptions{}, err
 	}
@@ -426,6 +494,7 @@ func cliUsageText(exeName string) string {
 オプション:
   --help, -h    このヘルプを表示
   --version     バージョンを表示
+  --test        テストモードで起動（テスト用ダミーデータを使用）
 `, appName, exeName)
 }
 
@@ -473,7 +542,7 @@ func describeStartupError(envPath, requiredKey, _ string, err error) string {
 	)
 }
 
-func run(args []string, stdout, stderr io.Writer) int {
+func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	ui := newStartupUI(stdout, stderr)
 
 	opts, err := parseCLIArgs(args)
@@ -507,6 +576,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 	dbPath := filepath.Join(exeDir, dbFileName)
 	ui.printBanner(version)
 	ui.printPaths(exeDir, logPath, dbPath)
+
+	testMode := opts.testMode
+	if !testMode && hasInteractiveConsole(stdin, stdout) {
+		testMode = promptStartupMode(ui, stdin, 5*time.Second)
+	}
+	if testMode {
+		if err := os.Setenv("OW_CUSTOMMATCH_BOT_TEST_MODE", "true"); err != nil {
+			log.Printf("[WARN] テストモード環境変数の設定に失敗: %v", err)
+		}
+		fmt.Fprintf(stdout, "  %s テストモードで起動します。\n\n", ui.style.yellow("TEST"))
+	} else {
+		fmt.Fprintf(stdout, "  %s 本番モードで起動します。\n\n", ui.style.green("PROD"))
+	}
+
 	ui.stepOK(1, 4, "ログ初期化")
 
 	log.Printf("[INFO] %s %s", appName, version)
@@ -528,10 +611,27 @@ func run(args []string, stdout, stderr io.Writer) int {
 	log.Printf("[INFO] [3/4] 必須設定チェック ... 開始")
 	botToken, err := requiredEnv("BOT_TOKEN")
 	if err != nil {
-		ui.stepFail(3, 4, "必須設定チェック")
-		log.Printf("[ERROR] 必須設定チェックに失敗: %v", err)
-		ui.printErrorLine("起動に失敗しました: " + describeStartupError(envPath, "BOT_TOKEN", dbFileName, err))
-		return 1
+		if hasInteractiveConsole(stdin, stdout) {
+			fmt.Fprintln(stdout)
+			token, promptErr := promptBotToken(ui, stdin)
+			if promptErr != nil {
+				ui.stepFail(3, 4, "必須設定チェック")
+				log.Printf("[ERROR] トークン入力に失敗: %v", promptErr)
+				ui.printErrorLine("起動に失敗しました: トークンが入力されませんでした。")
+				return 1
+			}
+			if saveErr := saveTokenToEnv(envPath, token); saveErr != nil {
+				log.Printf("[WARN] .env への保存に失敗しました: %v", saveErr)
+			} else {
+				log.Printf("[INFO] BOT_TOKEN を %s に保存しました", envPath)
+			}
+			botToken = token
+		} else {
+			ui.stepFail(3, 4, "必須設定チェック")
+			log.Printf("[ERROR] 必須設定チェックに失敗: %v", err)
+			ui.printErrorLine("起動に失敗しました: " + describeStartupError(envPath, "BOT_TOKEN", dbFileName, err))
+			return 1
+		}
 	}
 	ui.stepOK(3, 4, "必須設定チェック")
 	log.Printf("[INFO] [3/4] 必須設定チェック ... OK")
@@ -562,7 +662,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func main() {
-	code := run(os.Args[1:], os.Stdout, os.Stderr)
+	code := run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
 	pauseOnErrorExit(code, os.Stdin, os.Stdout)
 	os.Exit(code)
 }

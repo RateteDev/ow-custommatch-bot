@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeTempFile(t *testing.T, dir, name, body string) string {
@@ -70,6 +71,98 @@ func TestRequiredEnv(t *testing.T) {
 	}
 }
 
+func TestPromptBotToken(t *testing.T) {
+	t.Run("正常入力", func(t *testing.T) {
+		var out bytes.Buffer
+		ui := startupUI{out: &out}
+
+		got, err := promptBotToken(ui, strings.NewReader("mytoken\n"))
+		if err != nil {
+			t.Fatalf("promptBotToken returned error: %v", err)
+		}
+		if got != "mytoken" {
+			t.Fatalf("promptBotToken = %q, want %q", got, "mytoken")
+		}
+		if !strings.Contains(out.String(), "BOT_TOKEN を入力してください") {
+			t.Fatalf("prompt was not written: %q", out.String())
+		}
+	})
+
+	t.Run("空入力", func(t *testing.T) {
+		ui := startupUI{out: &bytes.Buffer{}}
+		if _, err := promptBotToken(ui, strings.NewReader("\n")); err == nil {
+			t.Fatalf("expected error for empty input")
+		}
+	})
+
+	t.Run("プレースホルダー入力", func(t *testing.T) {
+		ui := startupUI{out: &bytes.Buffer{}}
+		if _, err := promptBotToken(ui, strings.NewReader("YOUR_DISCORD_BOT_TOKEN\n")); err == nil {
+			t.Fatalf("expected error for placeholder input")
+		}
+	})
+
+	t.Run("EOF", func(t *testing.T) {
+		ui := startupUI{out: &bytes.Buffer{}}
+		if _, err := promptBotToken(ui, strings.NewReader("")); err == nil {
+			t.Fatalf("expected error for EOF input")
+		}
+	})
+}
+
+func TestSaveTokenToEnv(t *testing.T) {
+	t.Run(".env なし", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, ".env")
+
+		if err := saveTokenToEnv(path, "new-token"); err != nil {
+			t.Fatalf("saveTokenToEnv returned error: %v", err)
+		}
+
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read env file: %v", err)
+		}
+		if string(body) != "BOT_TOKEN=new-token\n" {
+			t.Fatalf("unexpected env content: %q", string(body))
+		}
+	})
+
+	t.Run(".env あり BOT_TOKEN 行なし", func(t *testing.T) {
+		dir := t.TempDir()
+		path := writeTempFile(t, dir, ".env", "FOO=bar\n")
+
+		if err := saveTokenToEnv(path, "appended-token"); err != nil {
+			t.Fatalf("saveTokenToEnv returned error: %v", err)
+		}
+
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read env file: %v", err)
+		}
+		if string(body) != "FOO=bar\nBOT_TOKEN=appended-token\n" {
+			t.Fatalf("unexpected env content: %q", string(body))
+		}
+	})
+
+	t.Run(".env あり BOT_TOKEN 行あり", func(t *testing.T) {
+		dir := t.TempDir()
+		path := writeTempFile(t, dir, ".env", "BOT_TOKEN=YOUR_DISCORD_BOT_TOKEN\nFOO=bar\n")
+
+		if err := saveTokenToEnv(path, "updated-token"); err != nil {
+			t.Fatalf("saveTokenToEnv returned error: %v", err)
+		}
+
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read env file: %v", err)
+		}
+		if string(body) != "BOT_TOKEN=updated-token\nFOO=bar\n" {
+			t.Fatalf("unexpected env content: %q", string(body))
+		}
+	})
+}
+
 func TestExecutableDir(t *testing.T) {
 	dir, err := executableDir()
 	if err != nil {
@@ -101,6 +194,16 @@ func TestParseCLIArgs(t *testing.T) {
 		}
 	})
 
+	t.Run("test flag", func(t *testing.T) {
+		opts, err := parseCLIArgs([]string{"--test"})
+		if err != nil {
+			t.Fatalf("parseCLIArgs returned error: %v", err)
+		}
+		if !opts.testMode {
+			t.Fatalf("expected testMode to be true")
+		}
+	})
+
 	t.Run("unknown flag", func(t *testing.T) {
 		if _, err := parseCLIArgs([]string{"--unknown"}); err == nil {
 			t.Fatalf("expected error for unknown flag")
@@ -110,11 +213,53 @@ func TestParseCLIArgs(t *testing.T) {
 
 func TestCLIUsageText(t *testing.T) {
 	text := cliUsageText("ow-custommatch-bot")
-	for _, want := range []string{"使い方", "--help", "--version", ".env", "BOT_TOKEN"} {
+	for _, want := range []string{"使い方", "--help", "--version", "--test", ".env", "BOT_TOKEN"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("usage text missing %q: %s", want, text)
 		}
 	}
+}
+
+func TestPromptStartupMode(t *testing.T) {
+	t.Run("test mode selected", func(t *testing.T) {
+		var out bytes.Buffer
+		ui := startupUI{out: &out}
+
+		got := promptStartupMode(ui, strings.NewReader("2\n"), 50*time.Millisecond)
+		if !got {
+			t.Fatalf("expected test mode to be selected")
+		}
+	})
+
+	t.Run("production mode selected", func(t *testing.T) {
+		ui := startupUI{out: &bytes.Buffer{}}
+
+		got := promptStartupMode(ui, strings.NewReader("1\n"), 50*time.Millisecond)
+		if got {
+			t.Fatalf("expected production mode to be selected")
+		}
+	})
+
+	t.Run("empty input", func(t *testing.T) {
+		ui := startupUI{out: &bytes.Buffer{}}
+
+		got := promptStartupMode(ui, strings.NewReader("\n"), 50*time.Millisecond)
+		if got {
+			t.Fatalf("expected empty input to select production mode")
+		}
+	})
+
+	t.Run("timeout", func(t *testing.T) {
+		ui := startupUI{out: &bytes.Buffer{}}
+		reader, writer := io.Pipe()
+		defer reader.Close()
+		defer writer.Close()
+
+		got := promptStartupMode(ui, reader, time.Millisecond)
+		if got {
+			t.Fatalf("expected timeout to select production mode")
+		}
+	})
 }
 
 func TestDescribeStartupError(t *testing.T) {
