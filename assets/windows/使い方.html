@@ -152,12 +152,6 @@
       gap: 16px;
     }
 
-    .two-col {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 16px;
-    }
-
     /* ── Card ── */
     .card {
       background: var(--card);
@@ -228,14 +222,14 @@
 
     /* ── Ordered / Unordered lists ── */
     ol { list-style: none; counter-reset: steps; padding: 0; }
-    ol li {
+    ol > li {
       counter-increment: steps;
       padding-left: 44px;
       position: relative;
       font-size: 14.5px;
     }
-    ol li + li { margin-top: 14px; }
-    ol li::before {
+    ol > li + li { margin-top: 14px; }
+    ol > li::before {
       content: counter(steps);
       position: absolute;
       left: 0;
@@ -271,7 +265,7 @@
     }
 
     /* nested ul inside ol */
-    ol li ul {
+    ol > li > ul {
       margin-top: 10px;
     }
 
@@ -498,97 +492,94 @@
         </ol>
       </section>
 
-      <!-- ── 4 & 5. ランク / チーム分け ── -->
-      <div class="two-col">
-        <section class="card">
-          <div class="card-num">4</div>
-          <h2>ランク登録</h2>
-          <div class="panel-list">
-            <div class="note warn">
-              エントリー時または <code>/register_rank</code> コマンドで登録できます。
-            </div>
-            <div class="note info">
-              ランクとディビジョン（1〜5）を選択します。<code>Top 500</code> はディビジョン選択が不要です。
-            </div>
-            <div class="note info">
-              登録は 30 日間有効です。期限切れの場合は次回エントリー時に再登録を求められます。
-            </div>
+      <!-- ── 4. ランク登録 ── -->
+      <section class="card">
+        <div class="card-num">4</div>
+        <h2>ランク登録</h2>
+        <div class="panel-list">
+          <div class="note warn">
+            エントリー時または <code>/register_rank</code> コマンドで登録できます。
           </div>
-        </section>
-
-        <section class="card">
-          <div class="card-num">5</div>
-          <h2>チーム分け</h2>
-          <div class="panel-list">
-            <div class="note info">
-              5 の倍数人数でチームを編成します。端数は「余りメンバー」として別表示されます。
-            </div>
-            <div class="note info">
-              ランクスコアを基準に、できるだけバランスが取れるよう振り分けます。
-            </div>
-            <div class="note info">
-              「再振り分け」を押すことで、何度でも再抽選できます。
-            </div>
+          <div class="note info">
+            ランクとディビジョン（1〜5）を選択します。<code>Top 500</code> はディビジョン選択が不要です。
           </div>
-        </section>
-      </div>
-
-      <!-- ── 6 & 7. 注意事項 / トークン ── -->
-      <div class="two-col">
-        <section class="card">
-          <div class="card-num">6</div>
-          <h2>注意事項</h2>
-          <ul>
-            <li>1 チャンネルにつき同時に開ける募集は 1 つのみです。</li>
-            <li>「振り分け」「中止」を実行できるのは発案者のみです。</li>
-          </ul>
-        </section>
-
-        <section class="card">
-          <div class="card-num">7</div>
-          <h2>トークンの上書き</h2>
-          <ul>
-            <li>起動メニューで <code>[3] トークンを上書きする</code> を選びます。</li>
-            <li>新しい <code>BOT_TOKEN</code> を入力すると、保存済みトークンが更新されます。</li>
-            <li>認証失敗時も、その場で新しい <code>BOT_TOKEN</code> を入力してそのまま再試行できます。</li>
-            <li>トークンの値を画面に表示する機能はありません。</li>
-          </ul>
-        </section>
-      </div>
-
-      <!-- ── 8 & 9. 終了 / トラブルシュート ── -->
-      <div class="two-col">
-        <section class="card">
-          <div class="card-num">8</div>
-          <h2>終了方法</h2>
-          <ul>
-            <li>ウィンドウを閉じるか、コンソールで <code>Ctrl+C</code> を押してください。</li>
-          </ul>
-        </section>
-
-        <section class="card">
-          <div class="card-num">9</div>
-          <h2>トラブルシュート</h2>
-          <div class="panel-list">
-            <div class="note danger">
-              <strong>BOT_TOKEN が保存されていません</strong>
-              初回起動時のトークン入力が完了していない可能性があります。<code>ow-custommatch-bot.exe</code> を起動し、案内に従ってトークンを入力してください。
-            </div>
-            <div class="note warn">
-              <strong>別のトークンに変更したい</strong>
-              起動メニューで <code>[3] トークンを上書きする</code> を選び、新しいトークンを入力してください。
-            </div>
-            <div class="note warn">
-              <strong>Authentication failed と表示された</strong>
-              <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Discord Developer Portal</a> を開き、<code>BOT TOKEN</code> を再発行または確認してください。画面の案内に従って新しいトークンを入力すると、そのままその場で再試行できます。
-            </div>
-            <div class="note danger">
-              <strong>BOT_TOKEN の設定に失敗しました</strong>
-              Windows Credential Manager に保存できなかった可能性があります。詳しい手順は <a href="https://ratetedev.github.io/ow-custommatch-bot/" target="_blank" rel="noreferrer">使い方ページ</a> をご確認ください。
-            </div>
+          <div class="note info">
+            登録は 30 日間有効です。期限切れの場合は次回エントリー時に再登録を求められます。
           </div>
-        </section>
-      </div>
+        </div>
+      </section>
+
+      <!-- ── 5. チーム分け ── -->
+      <section class="card">
+        <div class="card-num">5</div>
+        <h2>チーム分け</h2>
+        <div class="panel-list">
+          <div class="note info">
+            5 の倍数人数でチームを編成します。端数は「余りメンバー」として別表示されます。
+          </div>
+          <div class="note info">
+            ランクスコアを基準に、できるだけバランスが取れるよう振り分けます。
+          </div>
+          <div class="note info">
+            「再振り分け」を押すことで、何度でも再抽選できます。
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 6. 注意事項 ── -->
+      <section class="card">
+        <div class="card-num">6</div>
+        <h2>注意事項</h2>
+        <ul>
+          <li>1 チャンネルにつき同時に開ける募集は 1 つのみです。</li>
+          <li>「振り分け」「中止」を実行できるのは発案者のみです。</li>
+        </ul>
+      </section>
+
+      <!-- ── 7. トークンの上書き ── -->
+      <section class="card">
+        <div class="card-num">7</div>
+        <h2>トークンの上書き</h2>
+        <ul>
+          <li>起動メニューで <code>[3] トークンを上書きする</code> を選びます。</li>
+          <li>新しい <code>BOT_TOKEN</code> を入力すると、保存済みトークンが更新されます。</li>
+          <li>認証失敗時も、その場で新しい <code>BOT_TOKEN</code> を入力してそのまま再試行できます。</li>
+          <li>トークンの値を画面に表示する機能はありません。</li>
+        </ul>
+      </section>
+
+      <!-- ── 8. 終了方法 ── -->
+      <section class="card">
+        <div class="card-num">8</div>
+        <h2>終了方法</h2>
+        <ul>
+          <li>ウィンドウを閉じるか、コンソールで <code>Ctrl+C</code> を押してください。</li>
+        </ul>
+      </section>
+
+      <!-- ── 9. トラブルシュート ── -->
+      <section class="card">
+        <div class="card-num">9</div>
+        <h2>トラブルシュート</h2>
+        <div class="panel-list">
+          <div class="note danger">
+            <strong>BOT_TOKEN が保存されていません</strong>
+            初回起動時のトークン入力が完了していない可能性があります。<code>ow-custommatch-bot.exe</code> を起動し、案内に従ってトークンを入力してください。
+          </div>
+          <div class="note warn">
+            <strong>別のトークンに変更したい</strong>
+            起動メニューで <code>[3] トークンを上書きする</code> を選び、新しいトークンを入力してください。
+          </div>
+          <div class="note warn">
+            <strong>Authentication failed と表示された</strong>
+            <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Discord Developer Portal</a> を開き、<code>BOT TOKEN</code> を再発行または確認してください。画面の案内に従って新しいトークンを入力すると、そのままその場で再試行できます。
+          </div>
+          <div class="note danger">
+            <strong>BOT_TOKEN の設定に失敗しました</strong>
+            Windows Credential Manager に保存できなかった可能性があります。詳しい手順は <a href="https://ratetedev.github.io/ow-custommatch-bot/" target="_blank" rel="noreferrer">使い方ページ</a> をご確認ください。
+          </div>
+        </div>
+      </section>
 
       <!-- ── 10. 補足トラブルシュート ── -->
       <section class="card">
