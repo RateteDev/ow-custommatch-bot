@@ -277,6 +277,36 @@ func TestPromptStartupMode(t *testing.T) {
 	})
 }
 
+func TestPromptStartupAction(t *testing.T) {
+	t.Run("トークン上書きを選べる", func(t *testing.T) {
+		var out bytes.Buffer
+		ui := startupUI{out: &out}
+
+		got := promptStartupAction(ui, strings.NewReader("3\n"), 50*time.Millisecond)
+		if got != startupActionOverwriteToken {
+			t.Fatalf("promptStartupAction() = %v, want %v", got, startupActionOverwriteToken)
+		}
+		output := out.String()
+		for _, want := range []string{"[1] 通常運用", "[2] 動作確認用", "[3] トークンを上書きする"} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("prompt output missing %q: %q", want, output)
+			}
+		}
+	})
+
+	t.Run("タイムアウト時は通常運用", func(t *testing.T) {
+		ui := startupUI{out: &bytes.Buffer{}}
+		reader, writer := io.Pipe()
+		defer reader.Close()
+		defer writer.Close()
+
+		got := promptStartupAction(ui, reader, time.Millisecond)
+		if got != startupActionStartProd {
+			t.Fatalf("promptStartupAction() = %v, want %v", got, startupActionStartProd)
+		}
+	})
+}
+
 func TestStartupUIPrintBanner(t *testing.T) {
 	var out bytes.Buffer
 	ui := startupUI{out: &out}
@@ -284,7 +314,7 @@ func TestStartupUIPrintBanner(t *testing.T) {
 	ui.printBanner("1.2.3")
 
 	got := out.String()
-	for _, want := range []string{"Overwatch Custom Match Assistant", "v1.2.3", guideURL} {
+	for _, want := range []string{"OW CUSTOMMATCH BOT", "Version: v1.2.3", "使い方: " + guideURL} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("banner output missing %q: %q", want, got)
 		}
@@ -298,10 +328,13 @@ func TestStartupUIPrintPaths(t *testing.T) {
 	ui.printPaths("/var/lib/owcmb", "/var/log/owcmb.log", "/var/lib/owcmb/app.sqlite")
 
 	got := out.String()
-	for _, want := range []string{"データ保存先", "ログファイル", "データベース"} {
+	for _, want := range []string{"ログファイル", "データベース"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("paths output missing %q: %q", want, got)
 		}
+	}
+	if strings.Contains(got, "データ保存先") {
+		t.Fatalf("paths output should not contain データ保存先: %q", got)
 	}
 	for _, unwanted := range []string{"\ndata ", "\nlog ", "\ndb "} {
 		if strings.Contains("\n"+got, unwanted) {
@@ -317,7 +350,7 @@ func TestStartupUIReady(t *testing.T) {
 	ui.ready()
 
 	got := out.String()
-	for _, want := range []string{"準備完了", "Discordへの接続を開始します", "Ctrl+C"} {
+	for _, want := range []string{"Discord との接続に成功しました", "/match", "/register_rank", "/my_rank", "Ctrl+C"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("ready output missing %q: %q", want, got)
 		}
@@ -361,6 +394,44 @@ func TestDescribeTokenError(t *testing.T) {
 		}
 		if !strings.Contains(msg, guideURL) {
 			t.Fatalf("expected guide URL hint: %s", msg)
+		}
+	})
+}
+
+func TestOverwriteTokenFlow(t *testing.T) {
+	origSave := saveTokenToStoreFn
+	t.Cleanup(func() {
+		saveTokenToStoreFn = origSave
+	})
+
+	t.Run("保存先案内を出して上書きする", func(t *testing.T) {
+		var out bytes.Buffer
+		ui := startupUI{out: &out}
+		saved := ""
+		saveTokenToStoreFn = func(token string) error {
+			saved = token
+			return nil
+		}
+
+		if err := overwriteStoredToken(ui, strings.NewReader("next-token\n")); err != nil {
+			t.Fatalf("overwriteStoredToken returned error: %v", err)
+		}
+		if saved != "next-token" {
+			t.Fatalf("saved token = %q, want %q", saved, "next-token")
+		}
+		for _, want := range []string{"保存先", tokenStorageLocationLabel(), "保存済みトークンを更新しました"} {
+			if !strings.Contains(out.String(), want) {
+				t.Fatalf("overwrite output missing %q: %q", want, out.String())
+			}
+		}
+	})
+
+	t.Run("保存失敗を返す", func(t *testing.T) {
+		saveTokenToStoreFn = func(token string) error {
+			return errTokenStoreUnsupported
+		}
+		if err := overwriteStoredToken(startupUI{out: &bytes.Buffer{}}, strings.NewReader("next-token\n")); err == nil {
+			t.Fatalf("expected overwriteStoredToken to fail")
 		}
 	})
 }

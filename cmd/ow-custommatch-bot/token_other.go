@@ -9,3 +9,7 @@ func readTokenFromStore() (string, error) {
 func saveTokenToStore(string) error {
 	return errTokenStoreUnsupported
 }
+
+func deleteTokenFromStore() error {
+	return errTokenStoreUnsupported
+}

@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -22,9 +23,13 @@ type Bot struct {
 	vcConfig             *model.VCConfigManager
 	recruitmentsMu       sync.RWMutex
 	recruitments         map[string]*model.Recruitment
+	pendingRestartsMu    sync.RWMutex
+	pendingMatchRestarts map[string]pendingMatchRestart
 	pendingRegistrations map[string]pendingRegEntry
 	testDummies          map[string]map[string]model.PlayerInfo
 	now                  func() time.Time
+	readyOnce            sync.Once
+	readyNotifier        func()
 }
 
 type pendingRegEntry struct {
@@ -33,7 +38,22 @@ type pendingRegEntry struct {
 	autoEntry bool
 }
 
+type pendingMatchRestart struct {
+	token                string
+	guildID              string
+	channelID            string
+	requesterID          string
+	recruitmentMessageID string
+	fillWithDummies      bool
+}
+
 const rankRegistrationValidDuration = 30 * 24 * time.Hour
+
+var (
+	errMatchRestartNotFound     = errors.New("match restart request not found")
+	errMatchRestartNotRequester = errors.New("match restart requester mismatch")
+	errMatchRestartStateChanged = errors.New("match restart recruitment state changed")
+)
 
 type rankRegistrationPromptType int
 
@@ -67,6 +87,7 @@ func New(dbPath string) (*Bot, error) {
 		rankData:             ranks,
 		vcConfig:             vcConfig,
 		recruitments:         make(map[string]*model.Recruitment),
+		pendingMatchRestarts: make(map[string]pendingMatchRestart),
 		pendingRegistrations: make(map[string]pendingRegEntry),
 		testDummies:          make(map[string]map[string]model.PlayerInfo),
 		now:                  time.Now,
@@ -135,6 +156,16 @@ func (b *Bot) registerCommands() error {
 
 func (b *Bot) onReady(s *discordgo.Session, r *discordgo.Ready) {
 	log.Printf("Logged in as %s", r.User.String())
+	if b != nil && b.readyNotifier != nil {
+		b.readyOnce.Do(b.readyNotifier)
+	}
+}
+
+func (b *Bot) SetReadyNotifier(fn func()) {
+	if b == nil {
+		return
+	}
+	b.readyNotifier = fn
 }
 
 func (b *Bot) onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -153,18 +184,23 @@ func (b *Bot) onInteractionCreate(s *discordgo.Session, i *discordgo.Interaction
 			b.handleMyRank(s, i)
 		}
 	case discordgo.InteractionMessageComponent:
-		switch i.MessageComponentData().CustomID {
-		case "entry":
+		customID := i.MessageComponentData().CustomID
+		switch {
+		case customID == "entry":
 			b.handleEntry(s, i)
-		case "cancel_entry":
+		case customID == "cancel_entry":
 			b.handleCancelEntry(s, i)
-		case "assign":
+		case customID == "assign":
 			b.handleAssign(s, i)
-		case "cancel":
+		case customID == "cancel":
 			b.handleCancel(s, i)
-		case "rank_select":
+		case strings.HasPrefix(customID, "match_restart_confirm:"):
+			b.handleMatchRestartConfirm(s, i)
+		case strings.HasPrefix(customID, "match_restart_cancel:"):
+			b.handleMatchRestartCancel(s, i)
+		case customID == "rank_select":
 			b.handleRankSelect(s, i)
-		case "division_select":
+		case customID == "division_select":
 			b.handleDivisionSelect(s, i)
 		}
 	}
@@ -219,8 +255,22 @@ func (b *Bot) handleMatchStart(s *discordgo.Session, i *discordgo.InteractionCre
 	userID, _ := interactionUser(i)
 	r, started := b.startRecruitment(i.GuildID, channelID, userID)
 	if !started {
-		if err := b.respondEphemeralText(s, i, "このチャンネルでは既に募集が開始されています"); err != nil {
-			log.Printf("failed to respond match start conflict: %v", err)
+		req, ok := b.prepareMatchRestartRequest(i.GuildID, channelID, userID, os.Getenv("OW_CUSTOMMATCH_BOT_TEST_MODE") == "true" && matchStartFillMode(i))
+		if !ok {
+			if err := b.respondEphemeralText(s, i, "このチャンネルでは既に募集が開始されています"); err != nil {
+				log.Printf("failed to respond match start conflict: %v", err)
+			}
+			return
+		}
+		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content:    buildMatchRestartPrompt(),
+				Flags:      discordgo.MessageFlagsEphemeral,
+				Components: buildMatchRestartComponents(req.token),
+			},
+		}); err != nil {
+			log.Printf("failed to respond match restart prompt: %v", err)
 		}
 		return
 	}
@@ -247,6 +297,68 @@ func (b *Bot) handleMatchStart(s *discordgo.Session, i *discordgo.InteractionCre
 		return
 	}
 	r.MessageID = msg.ID
+}
+
+func (b *Bot) handleMatchRestartConfirm(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	token, ok := parseComponentActionToken(i.MessageComponentData().CustomID, "match_restart_confirm")
+	if !ok {
+		_ = b.respondEphemeralText(s, i, "確認画面を認識できませんでした。/match をやり直してください。")
+		return
+	}
+
+	userID, _ := interactionUser(i)
+	req, current, next, err := b.confirmMatchRestart(token, userID)
+	if err != nil {
+		_ = b.respondMatchRestartError(s, i, err)
+		return
+	}
+
+	if req.fillWithDummies {
+		b.injectTestDummies(next.ChannelID, next)
+	}
+	if current != nil {
+		if err := b.updateClosedEmbed(s, current, "🔁 新しい募集が開始されました"); err != nil {
+			log.Printf("failed to update previous recruit embed on restart: %v", err)
+		}
+	}
+
+	msg, err := s.ChannelMessageSendComplex(next.ChannelID, &discordgo.MessageSend{
+		Embeds:     []*discordgo.MessageEmbed{buildRecruitEmbed(next, "🎮 マッチング募集", 0x2ECC71)},
+		Components: b.buildRecruitComponents(next, false),
+	})
+	if err != nil {
+		log.Printf("failed to send restarted recruitment message: %v", err)
+		b.rollbackMatchRestart(current, next)
+		if current != nil {
+			if updateErr := b.updateRecruitEmbed(s, current, false); updateErr != nil {
+				log.Printf("failed to restore previous recruit embed after restart error: %v", updateErr)
+			}
+		}
+		_ = b.updateComponentWithText(s, i, "新しい募集の開始に失敗しました。既存の募集をそのまま継続します。")
+		return
+	}
+	next.MessageID = msg.ID
+
+	if err := b.updateComponentWithText(s, i, "既存の募集を閉じて、新しい募集を開始しました。"); err != nil {
+		log.Printf("failed to update restart confirmation message: %v", err)
+	}
+}
+
+func (b *Bot) handleMatchRestartCancel(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	token, ok := parseComponentActionToken(i.MessageComponentData().CustomID, "match_restart_cancel")
+	if !ok {
+		_ = b.respondEphemeralText(s, i, "確認画面を認識できませんでした。/match をやり直してください。")
+		return
+	}
+
+	userID, _ := interactionUser(i)
+	if err := b.cancelMatchRestart(token, userID); err != nil {
+		_ = b.respondMatchRestartError(s, i, err)
+		return
+	}
+	if err := b.updateComponentWithText(s, i, "新しい募集の開始をキャンセルしました。"); err != nil {
+		log.Printf("failed to update restart cancel message: %v", err)
+	}
 }
 
 func (b *Bot) handleEntry(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -872,6 +984,38 @@ func (b *Bot) buildRecruitComponents(r *model.Recruitment, disabled bool) []disc
 	}
 }
 
+func buildMatchRestartPrompt() string {
+	return "このチャンネルでは既に募集が開始されています。\n\n現在の募集を閉じて、新しく募集を開始しますか？\n現在の参加者一覧は引き継がれません。"
+}
+
+func buildMatchRestartComponents(token string) []discordgo.MessageComponent {
+	return []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.Button{
+					Label:    "既存の募集を閉じて開始",
+					CustomID: "match_restart_confirm:" + token,
+					Style:    discordgo.DangerButton,
+				},
+				discordgo.Button{
+					Label:    "キャンセル",
+					CustomID: "match_restart_cancel:" + token,
+					Style:    discordgo.SecondaryButton,
+				},
+			},
+		},
+	}
+}
+
+func parseComponentActionToken(customID, action string) (string, bool) {
+	prefix := action + ":"
+	if !strings.HasPrefix(customID, prefix) {
+		return "", false
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(customID, prefix))
+	return token, token != ""
+}
+
 func teamAverageScore(team []model.ScoredPlayer) float64 {
 	if len(team) == 0 {
 		return 0
@@ -971,6 +1115,120 @@ func (b *Bot) startRankRegistrationFlow(s *discordgo.Session, i *discordgo.Inter
 		autoEntry: autoEntry,
 	}
 	return nil
+}
+
+func (b *Bot) prepareMatchRestartRequest(guildID, channelID, requesterID string, fillWithDummies bool) (pendingMatchRestart, bool) {
+	current, ok := b.getRecruitment(channelID)
+	if !ok || current == nil || !current.IsOpen {
+		return pendingMatchRestart{}, false
+	}
+
+	req := pendingMatchRestart{
+		token:                fmt.Sprintf("%s-%d", channelID, b.nowUTC().UnixNano()),
+		guildID:              guildID,
+		channelID:            channelID,
+		requesterID:          requesterID,
+		recruitmentMessageID: current.MessageID,
+		fillWithDummies:      fillWithDummies,
+	}
+
+	b.pendingRestartsMu.Lock()
+	defer b.pendingRestartsMu.Unlock()
+	b.pendingMatchRestarts[req.token] = req
+	return req, true
+}
+
+func (b *Bot) getPendingMatchRestart(token string) (pendingMatchRestart, bool) {
+	b.pendingRestartsMu.RLock()
+	defer b.pendingRestartsMu.RUnlock()
+
+	req, ok := b.pendingMatchRestarts[token]
+	return req, ok
+}
+
+func (b *Bot) deletePendingMatchRestart(token string) {
+	b.pendingRestartsMu.Lock()
+	defer b.pendingRestartsMu.Unlock()
+	delete(b.pendingMatchRestarts, token)
+}
+
+func (b *Bot) confirmMatchRestart(token, userID string) (pendingMatchRestart, *model.Recruitment, *model.Recruitment, error) {
+	req, ok := b.getPendingMatchRestart(token)
+	if !ok {
+		return pendingMatchRestart{}, nil, nil, errMatchRestartNotFound
+	}
+	if userID != req.requesterID {
+		return pendingMatchRestart{}, nil, nil, errMatchRestartNotRequester
+	}
+
+	b.recruitmentsMu.Lock()
+	defer b.recruitmentsMu.Unlock()
+
+	current, ok := b.recruitments[req.channelID]
+	if !ok || current == nil || !current.IsOpen {
+		b.deletePendingMatchRestart(token)
+		return pendingMatchRestart{}, nil, nil, errMatchRestartStateChanged
+	}
+	if req.recruitmentMessageID != "" && current.MessageID != req.recruitmentMessageID {
+		b.deletePendingMatchRestart(token)
+		return pendingMatchRestart{}, nil, nil, errMatchRestartStateChanged
+	}
+
+	current.IsOpen = false
+	next := model.NewRecruitment(b.rankData)
+	next.OrganizerID = userID
+	next.ChannelID = req.channelID
+	next.GuildID = req.guildID
+	next.IsOpen = true
+	b.recruitments[req.channelID] = next
+	if b.testDummies != nil {
+		b.testDummies[req.channelID] = make(map[string]model.PlayerInfo)
+	}
+	b.deletePendingMatchRestart(token)
+	return req, current, next, nil
+}
+
+func (b *Bot) rollbackMatchRestart(current, next *model.Recruitment) {
+	if next == nil {
+		return
+	}
+
+	b.recruitmentsMu.Lock()
+	defer b.recruitmentsMu.Unlock()
+
+	delete(b.testDummies, next.ChannelID)
+
+	if current != nil {
+		current.IsOpen = true
+		b.recruitments[next.ChannelID] = current
+		return
+	}
+	delete(b.recruitments, next.ChannelID)
+}
+
+func (b *Bot) cancelMatchRestart(token, userID string) error {
+	req, ok := b.getPendingMatchRestart(token)
+	if !ok {
+		return errMatchRestartNotFound
+	}
+	if userID != req.requesterID {
+		return errMatchRestartNotRequester
+	}
+	b.deletePendingMatchRestart(token)
+	return nil
+}
+
+func (b *Bot) respondMatchRestartError(s *discordgo.Session, i *discordgo.InteractionCreate, err error) error {
+	switch err {
+	case errMatchRestartNotRequester:
+		return b.respondEphemeralText(s, i, "この確認画面を操作できるのは実行した本人のみです")
+	case errMatchRestartNotFound:
+		return b.updateComponentWithText(s, i, "この確認画面はもう使えません。/match をやり直してください。")
+	case errMatchRestartStateChanged:
+		return b.updateComponentWithText(s, i, "募集の状態が変わったため、/match をやり直してください。")
+	default:
+		return b.updateComponentWithText(s, i, "募集の再開処理に失敗しました。/match をやり直してください。")
+	}
 }
 
 func (b *Bot) respondRankRegistrationPrompt(s *discordgo.Session, i *discordgo.InteractionCreate, promptType rankRegistrationPromptType) error {

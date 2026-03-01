@@ -22,7 +22,7 @@ make test       # ユニットテスト実行
 make build      # bin/ow-custommatch-bot をビルド
 make run        # bin/ow-custommatch-bot を実行（内部で make build 実行）
 make build-win  # Windows 向け bin/ow-custommatch-bot.exe をビルド
-make package-win # Windows 配布用 zip を生成
+make release-win-exe # 配布用 exe を dist/ にコピー
 ```
 
 ## ビルド出力先
@@ -36,48 +36,28 @@ make build
 make build-win
 ```
 
-## Windows 配布パッケージ（zip）
-
-Windows 向け配布用 zip は以下で生成します。
+## Windows 配布用 exe
 
 ```bash
-make package-win
+make release-win-exe
 ```
 
 生成物:
 
-- `dist/ow-custommatch-bot-win64.zip`
+- `dist/ow-custommatch-bot.exe`
 
-zip の同梱内容:
+## 実行時に必要なファイル
 
-- `ow-custommatch-bot.exe`
-- `.env`（`.env.example` をリネームして同梱）
-- `使い方.html`
-- `LICENSE`
-
-補足:
-
-- `7z` コマンド（7-Zip）が必要です。
-- `assets/windows/使い方.html` が存在しない場合、`make package-win` はエラー終了します。
-
-## 実行時に必要なファイル（bin 配下）
-
-- `.env`（`BOT_TOKEN` を設定）
-- `ow-custommatch-bot.db`（初回起動時に自動生成されるため事前作成不要）
-
-`.env.example` を `bin/.env` としてコピーしてください。
-（配布用 zip では `make package-win` が `.env.example` を `.env` にリネームして同梱します）
+- `ow-custommatch-bot.db`
+  初回起動時に自動生成されます。
 
 補足:
 
 - ランクマスタは `go:embed` でバイナリに埋め込まれています。
-- `ow-custommatch-bot.db` は実行ファイルと同じディレクトリに作成されます。
+- SQLite DB、VC 設定、ログは `%LOCALAPPDATA%\ow-custommatch-bot\` 配下に作成されます。
+- `BOT_TOKEN` は `.env` ではなく Windows Credential Manager の `ow-custommatch-bot/BOT_TOKEN` に保存されます。
 
-## 環境変数（.env）
-
-最低限必要:
-
-- `BOT_TOKEN`: Discord Bot トークン
+## 環境変数
 
 テストモード（任意）:
 
@@ -89,7 +69,6 @@ zip の同梱内容:
 例（`bin/.env`）:
 
 ```dotenv
-BOT_TOKEN=your_bot_token
 OW_CUSTOMMATCH_BOT_TEST_MODE=true
 ```
 
@@ -102,6 +81,16 @@ OW_CUSTOMMATCH_BOT_TEST_MODE=true
 ```bash
 make test
 ```
+
+## 保存済みトークンの削除（開発者向け）
+
+利用者向け画面には削除導線を出していません。開発や検証で保存済みトークンを消したい場合は、Windows のコマンドプロンプトまたは PowerShell で以下を実行してください。
+
+```powershell
+cmdkey /delete:ow-custommatch-bot/BOT_TOKEN
+```
+
+削除後に通常起動すると、初回起動と同様に `BOT_TOKEN` の入力を求められます。
 
 ## 配布素材（Windows）
 

@@ -218,7 +218,7 @@
           <li>Discord Developer Portal でアプリケーションを作成し、Bot トークンを取得します。</li>
           <li>GitHub Release から <code>ow-custommatch-bot.exe</code> を取得します。配布物は exe 1 ファイルのみです。</li>
           <li><code>ow-custommatch-bot.exe</code> を起動し、初回表示に従って <code>BOT_TOKEN</code> を入力します。</li>
-          <li>入力したトークンは Windows Credential Manager に保存されます。プレイヤー情報やログは <code>%LOCALAPPDATA%\ow-custommatch-bot\</code> 配下に保存されます。</li>
+          <li>入力したトークンは Windows Credential Manager の <code>ow-custommatch-bot/BOT_TOKEN</code> に保存されます。プレイヤー情報やログは <code>%LOCALAPPDATA%\ow-custommatch-bot\</code> 配下に保存されます。</li>
           <li>Discord サーバーに Bot を招待します。招待時のスコープは <code>bot</code> と <code>applications.commands</code> を選択してください。</li>
         </ol>
       </section>
@@ -239,6 +239,10 @@
               <td><code>/register_rank</code></td>
               <td>チーム分け用ランクを登録または更新します。</td>
             </tr>
+            <tr>
+              <td><code>/my_rank</code></td>
+              <td>登録済みランクと有効期限を確認します。</td>
+            </tr>
           </tbody>
         </table>
       </section>
@@ -247,6 +251,7 @@
         <h2>3. <code>/match</code> の操作フロー</h2>
         <ol>
           <li>発案者が <code>/match</code> を実行すると、募集 Embed が投稿されます。</li>
+          <li>同じチャンネルですでに募集が開いている場合は、今の募集を閉じて新しく始めるか、そのままキャンセルするかを選べます。</li>
           <li>参加者が「エントリー」を押します。
             <ul>
               <li>ランク未登録の場合はランク登録フローが開始し、登録完了後に自動でエントリーされます。</li>
@@ -301,24 +306,45 @@
         </div>
 
         <div>
+          <h2>7. トークンの上書き</h2>
+          <ul>
+            <li>起動メニューの <code>[3] トークンを上書きする</code> を選びます。</li>
+            <li>新しい <code>BOT_TOKEN</code> を入力すると、保存済みトークンが更新されます。</li>
+            <li>トークン値そのものを確認表示する機能はありません。</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card two-column">
+        <div>
           <h2>8. 終了方法</h2>
           <ul>
             <li>ウィンドウを閉じるか、<code>Ctrl+C</code> を押してください。</li>
           </ul>
         </div>
+
+        <div>
+          <h2>9. トラブルシュート</h2>
+          <div class="panel-list">
+            <div class="note danger">
+              <strong>BOT_TOKEN が保存されていません</strong><br>
+              初回起動時の入力が完了していない可能性があります。<code>ow-custommatch-bot.exe</code> を起動し、案内に従ってトークンを入力してください。
+            </div>
+            <div class="note warn">
+              <strong>別のトークンに変更したい</strong><br>
+              起動メニューの <code>[3] トークンを上書きする</code> を選び、新しいトークンを入力してください。
+            </div>
+            <div class="note danger">
+              <strong>BOT_TOKEN の設定に失敗しました</strong><br>
+              Windows Credential Manager に保存できなかった可能性があります。再起動して入力し直してください。
+            </div>
+          </div>
+        </div>
       </section>
 
       <section class="card">
-        <h2>7. トラブルシュート</h2>
+        <h2>10. 補足トラブルシュート</h2>
         <div class="panel-list">
-          <div class="note danger">
-            <strong>BOT_TOKEN が保存されていません</strong><br>
-            初回起動時の入力が完了していない可能性があります。<code>ow-custommatch-bot.exe</code> を起動し、案内に従ってトークンを入力してください。
-          </div>
-          <div class="note danger">
-            <strong>BOT_TOKEN の設定に失敗しました</strong><br>
-            Windows Credential Manager に保存できなかった可能性があります。再起動して入力し直してください。
-          </div>
           <div class="note danger">
             <strong>failed to initialize bot</strong><br>
             <code>%LOCALAPPDATA%\ow-custommatch-bot\</code> に書き込み権限があるか確認してください。

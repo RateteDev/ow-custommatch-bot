@@ -294,6 +294,249 @@ func TestRecruitmentAccessorsSetGetDelete(t *testing.T) {
 	}
 }
 
+func TestPrepareMatchRestartRequest(t *testing.T) {
+	rankData, err := model.LoadEmbeddedRankData()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedRankData failed: %v", err)
+	}
+
+	b := &Bot{
+		rankData:             rankData,
+		recruitments:         make(map[string]*model.Recruitment),
+		pendingMatchRestarts: make(map[string]pendingMatchRestart),
+		testDummies:          make(map[string]map[string]model.PlayerInfo),
+		now:                  func() time.Time { return time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC) },
+	}
+	current, started := b.startRecruitment("guild-1", "channel-1", "organizer-1")
+	if !started {
+		t.Fatalf("initial recruitment should start")
+	}
+	current.MessageID = "message-1"
+
+	req, ok := b.prepareMatchRestartRequest("guild-1", "channel-1", "organizer-2", true)
+	if !ok {
+		t.Fatalf("prepareMatchRestartRequest should succeed")
+	}
+	if req.token == "" {
+		t.Fatalf("restart request token should not be empty")
+	}
+	if !req.fillWithDummies {
+		t.Fatalf("fillWithDummies should be preserved")
+	}
+	stored, ok := b.getPendingMatchRestart(req.token)
+	if !ok {
+		t.Fatalf("pending restart should be stored")
+	}
+	if stored.recruitmentMessageID != "message-1" {
+		t.Fatalf("stored recruitment message id = %q, want %q", stored.recruitmentMessageID, "message-1")
+	}
+	if stored.requesterID != "organizer-2" {
+		t.Fatalf("stored requester id = %q, want %q", stored.requesterID, "organizer-2")
+	}
+}
+
+func TestConfirmMatchRestart(t *testing.T) {
+	rankData, err := model.LoadEmbeddedRankData()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedRankData failed: %v", err)
+	}
+
+	newBot := func() *Bot {
+		return &Bot{
+			rankData:             rankData,
+			recruitments:         make(map[string]*model.Recruitment),
+			pendingMatchRestarts: make(map[string]pendingMatchRestart),
+			testDummies:          make(map[string]map[string]model.PlayerInfo),
+			now:                  func() time.Time { return time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC) },
+		}
+	}
+
+	t.Run("確認した本人だけが既存募集を閉じて開始できる", func(t *testing.T) {
+		b := newBot()
+		current, started := b.startRecruitment("guild-1", "channel-1", "organizer-1")
+		if !started {
+			t.Fatalf("initial recruitment should start")
+		}
+		current.MessageID = "message-1"
+		current.AddEntry("player-1", "Player 1")
+
+		req, ok := b.prepareMatchRestartRequest("guild-1", "channel-1", "organizer-1", false)
+		if !ok {
+			t.Fatalf("prepareMatchRestartRequest should succeed")
+		}
+
+		_, oldRecruitment, newRecruitment, err := b.confirmMatchRestart(req.token, "organizer-1")
+		if err != nil {
+			t.Fatalf("confirmMatchRestart returned error: %v", err)
+		}
+		if oldRecruitment != current {
+			t.Fatalf("old recruitment = %v, want %v", oldRecruitment, current)
+		}
+		if oldRecruitment.IsOpen {
+			t.Fatalf("old recruitment should be closed")
+		}
+		if newRecruitment == nil || !newRecruitment.IsOpen {
+			t.Fatalf("new recruitment should be open")
+		}
+		if len(newRecruitment.Entries) != 0 {
+			t.Fatalf("new recruitment should not inherit entries, got %d", len(newRecruitment.Entries))
+		}
+		if newRecruitment == oldRecruitment {
+			t.Fatalf("new recruitment should be distinct from old recruitment")
+		}
+		got, ok := b.getRecruitment("channel-1")
+		if !ok || got != newRecruitment {
+			t.Fatalf("current recruitment = %v, %v; want new recruitment", got, ok)
+		}
+		if _, ok := b.getPendingMatchRestart(req.token); ok {
+			t.Fatalf("pending restart should be removed after confirm")
+		}
+	})
+
+	t.Run("本人以外の操作は拒否する", func(t *testing.T) {
+		b := newBot()
+		current, started := b.startRecruitment("guild-1", "channel-1", "organizer-1")
+		if !started {
+			t.Fatalf("initial recruitment should start")
+		}
+		current.MessageID = "message-1"
+		req, ok := b.prepareMatchRestartRequest("guild-1", "channel-1", "organizer-1", false)
+		if !ok {
+			t.Fatalf("prepareMatchRestartRequest should succeed")
+		}
+
+		_, _, _, err := b.confirmMatchRestart(req.token, "other-user")
+		if err == nil || err != errMatchRestartNotRequester {
+			t.Fatalf("confirmMatchRestart error = %v, want %v", err, errMatchRestartNotRequester)
+		}
+		got, ok := b.getRecruitment("channel-1")
+		if !ok || got != current || !got.IsOpen {
+			t.Fatalf("recruitment should stay unchanged: %v, %v", got, ok)
+		}
+	})
+
+	t.Run("確認後に募集状態が変わっていたら安全側で拒否する", func(t *testing.T) {
+		b := newBot()
+		current, started := b.startRecruitment("guild-1", "channel-1", "organizer-1")
+		if !started {
+			t.Fatalf("initial recruitment should start")
+		}
+		current.MessageID = "message-1"
+		req, ok := b.prepareMatchRestartRequest("guild-1", "channel-1", "organizer-1", false)
+		if !ok {
+			t.Fatalf("prepareMatchRestartRequest should succeed")
+		}
+
+		current.IsOpen = false
+		_, _, _, err := b.confirmMatchRestart(req.token, "organizer-1")
+		if err == nil || err != errMatchRestartStateChanged {
+			t.Fatalf("confirmMatchRestart error = %v, want %v", err, errMatchRestartStateChanged)
+		}
+		if _, ok := b.getPendingMatchRestart(req.token); ok {
+			t.Fatalf("pending restart should be removed after state change")
+		}
+	})
+}
+
+func TestCancelMatchRestart(t *testing.T) {
+	rankData, err := model.LoadEmbeddedRankData()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedRankData failed: %v", err)
+	}
+
+	b := &Bot{
+		rankData:             rankData,
+		recruitments:         make(map[string]*model.Recruitment),
+		pendingMatchRestarts: make(map[string]pendingMatchRestart),
+		testDummies:          make(map[string]map[string]model.PlayerInfo),
+		now:                  func() time.Time { return time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC) },
+	}
+	current, started := b.startRecruitment("guild-1", "channel-1", "organizer-1")
+	if !started {
+		t.Fatalf("initial recruitment should start")
+	}
+	current.MessageID = "message-1"
+	req, ok := b.prepareMatchRestartRequest("guild-1", "channel-1", "organizer-1", false)
+	if !ok {
+		t.Fatalf("prepareMatchRestartRequest should succeed")
+	}
+
+	if err := b.cancelMatchRestart(req.token, "organizer-1"); err != nil {
+		t.Fatalf("cancelMatchRestart returned error: %v", err)
+	}
+	got, ok := b.getRecruitment("channel-1")
+	if !ok || got != current || !got.IsOpen {
+		t.Fatalf("recruitment should stay open: %v, %v", got, ok)
+	}
+	if _, ok := b.getPendingMatchRestart(req.token); ok {
+		t.Fatalf("pending restart should be removed after cancel")
+	}
+}
+
+func TestRollbackMatchRestart(t *testing.T) {
+	rankData, err := model.LoadEmbeddedRankData()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedRankData failed: %v", err)
+	}
+
+	b := &Bot{
+		rankData:     rankData,
+		recruitments: make(map[string]*model.Recruitment),
+		testDummies:  make(map[string]map[string]model.PlayerInfo),
+	}
+	current := model.NewRecruitment(rankData)
+	current.ChannelID = "channel-1"
+	current.IsOpen = false
+	next := model.NewRecruitment(rankData)
+	next.ChannelID = "channel-1"
+	next.IsOpen = true
+	b.recruitments["channel-1"] = next
+	b.testDummies["channel-1"] = map[string]model.PlayerInfo{
+		"dummy-1": {ID: "dummy-1", Name: "dummy"},
+	}
+
+	b.rollbackMatchRestart(current, next)
+
+	got, ok := b.getRecruitment("channel-1")
+	if !ok || got != current || !got.IsOpen {
+		t.Fatalf("recruitment should be restored to current: %v, %v", got, ok)
+	}
+	if _, ok := b.testDummies["channel-1"]; ok {
+		t.Fatalf("test dummies should be cleared on rollback")
+	}
+}
+
+func TestBuildMatchRestartComponents(t *testing.T) {
+	components := buildMatchRestartComponents("restart-token")
+	if len(components) != 1 {
+		t.Fatalf("len(components) = %d, want 1", len(components))
+	}
+
+	row, ok := components[0].(discordgo.ActionsRow)
+	if !ok {
+		t.Fatalf("component should be actions row")
+	}
+	if len(row.Components) != 2 {
+		t.Fatalf("len(row.Components) = %d, want 2", len(row.Components))
+	}
+
+	confirm, ok := row.Components[0].(discordgo.Button)
+	if !ok {
+		t.Fatalf("first component should be button")
+	}
+	cancel, ok := row.Components[1].(discordgo.Button)
+	if !ok {
+		t.Fatalf("second component should be button")
+	}
+
+	if confirm.CustomID != "match_restart_confirm:restart-token" {
+		t.Fatalf("confirm.CustomID = %q", confirm.CustomID)
+	}
+	if cancel.CustomID != "match_restart_cancel:restart-token" {
+		t.Fatalf("cancel.CustomID = %q", cancel.CustomID)
+	}
+}
+
 func TestTeamAverageScore(t *testing.T) {
 	t.Run("空チームは0", func(t *testing.T) {
 		if got := teamAverageScore(nil); got != 0 {

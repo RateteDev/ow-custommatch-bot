@@ -31,3 +31,14 @@ func saveTokenToStore(token string) error {
 	cred.Comment = appName + " Discord bot token"
 	return cred.Write()
 }
+
+func deleteTokenFromStore() error {
+	cred, err := wincred.GetGenericCredential(tokenStoreTarget)
+	if err != nil {
+		if errors.Is(err, wincred.ErrElementNotFound) {
+			return errTokenNotFound
+		}
+		return err
+	}
+	return cred.Delete()
+}

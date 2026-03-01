@@ -28,8 +28,9 @@ var version = "dev"
 var runtimeGOOS = runtime.GOOS
 var hasInteractiveConsole = detectInteractiveConsole
 var (
-	readTokenFromStoreFn = readTokenFromStore
-	saveTokenToStoreFn   = saveTokenToStore
+	readTokenFromStoreFn   = readTokenFromStore
+	saveTokenToStoreFn     = saveTokenToStore
+	deleteTokenFromStoreFn = deleteTokenFromStore
 )
 
 var (
@@ -43,6 +44,14 @@ type cliOptions struct {
 	showVersion bool
 	testMode    bool
 }
+
+type startupAction int
+
+const (
+	startupActionStartProd startupAction = iota
+	startupActionStartTest
+	startupActionOverwriteToken
+)
 
 type ansiStyle struct {
 	enabled bool
@@ -82,17 +91,17 @@ func newStartupUI(out, err io.Writer) startupUI {
 func (ui startupUI) printBanner(ver string) {
 	fmt.Fprintln(ui.out)
 	fmt.Fprintln(ui.out, ui.style.magenta("+- OW CUSTOMMATCH BOT --------------------------------------+"))
-	fmt.Fprintf(ui.out, "%s %s\n", ui.style.bold("  Overwatch Custom Match Assistant"), ui.style.dim("v"+ver))
+	fmt.Fprintf(ui.out, "  %s\n", ui.style.bold("OW CUSTOMMATCH BOT"))
+	fmt.Fprintf(ui.out, "  %s %s\n", ui.style.cyan("Version:"), ui.style.dim("v"+ver))
+	fmt.Fprintf(ui.out, "  %s %s\n", ui.style.cyan("使い方:"), guideURL)
 	fmt.Fprintln(ui.out, ui.style.magenta("+-----------------------------------------------------------+"))
-	fmt.Fprintf(ui.out, "  %s %s\n", ui.style.cyan("ご利用ガイド:"), guideURL)
 	fmt.Fprintln(ui.out)
 }
 
-func (ui startupUI) printPaths(dataDir, logPath, dbPath string) {
+func (ui startupUI) printPaths(_ string, logPath, dbPath string) {
 	label := func(name string) string {
 		return ui.style.cyan(fmt.Sprintf("%-7s", name))
 	}
-	fmt.Fprintf(ui.out, "  %s %s\n", label("データ保存先"), dataDir)
 	fmt.Fprintf(ui.out, "  %s %s\n", label("ログファイル"), logPath)
 	fmt.Fprintf(ui.out, "  %s %s\n", label("データベース"), dbPath)
 	fmt.Fprintln(ui.out)
@@ -133,8 +142,11 @@ func (ui startupUI) stepFail(i, total int, title string) {
 
 func (ui startupUI) ready() {
 	fmt.Fprintln(ui.out)
-	fmt.Fprintf(ui.out, "%s Discordへの接続を開始します。終了するには %s を押してください。\n\n",
-		ui.style.green("準備完了"),
+	fmt.Fprintf(ui.out, "%s %s\n", ui.style.green("🎉"), ui.style.bold("Discord との接続に成功しました。"))
+	fmt.Fprintf(ui.out, "   %s コマンドで募集を開始できます。\n", ui.style.cyan("/match"))
+	fmt.Fprintf(ui.out, "   %s コマンドでランクを登録・更新できます。\n", ui.style.cyan("/register_rank"))
+	fmt.Fprintf(ui.out, "   %s コマンドで登録済みランクを確認できます。\n", ui.style.cyan("/my_rank"))
+	fmt.Fprintf(ui.out, "\n   終了するには %s を押してください。\n\n",
 		ui.style.bold("Ctrl+C"),
 	)
 }
@@ -350,16 +362,19 @@ func promptBotToken(ui startupUI, stdin io.Reader) (string, error) {
 	return token, nil
 }
 
-func promptStartupMode(ui startupUI, stdin io.Reader, timeout time.Duration) bool {
+func promptStartupAction(ui startupUI, stdin io.Reader, timeout time.Duration) startupAction {
 	fmt.Fprintln(ui.out)
 	fmt.Fprintln(ui.out, ui.style.bold("  起動方法を選択してください"))
 	fmt.Fprintln(ui.out, "  普段そのままお使いになる場合は [1] を選んでください。")
 	fmt.Fprintln(ui.out, "  表示確認や試運転をしたい場合は [2] を選んでください。")
+	fmt.Fprintln(ui.out, "  保存済みトークンを更新したい場合は [3] を選んでください。")
 	fmt.Fprintln(ui.out)
 	fmt.Fprintln(ui.out, "    [1] 通常運用")
 	fmt.Fprintln(ui.out, "        実際の運用として起動します。")
 	fmt.Fprintln(ui.out, "    [2] 動作確認用")
 	fmt.Fprintln(ui.out, "        テスト用ダミーデータで画面や流れを確認できます。")
+	fmt.Fprintln(ui.out, "    [3] トークンを上書きする")
+	fmt.Fprintf(ui.out, "        保存先: %s\n", tokenStorageLocationLabel())
 	fmt.Fprintln(ui.out)
 	fmt.Fprintln(ui.out, "  Enterキーですぐに通常運用を開始できます。")
 	fmt.Fprintf(ui.out, "  未入力の場合は%d秒後に自動で通常運用を開始します。> ", int(timeout.Seconds()))
@@ -376,11 +391,25 @@ func promptStartupMode(ui startupUI, stdin io.Reader, timeout time.Duration) boo
 	select {
 	case input, ok := <-ch:
 		fmt.Fprintln(ui.out)
-		return ok && input == "2"
+		if !ok {
+			return startupActionStartProd
+		}
+		switch input {
+		case "2":
+			return startupActionStartTest
+		case "3":
+			return startupActionOverwriteToken
+		default:
+			return startupActionStartProd
+		}
 	case <-time.After(timeout):
 		fmt.Fprintln(ui.out)
-		return false
+		return startupActionStartProd
 	}
+}
+
+func promptStartupMode(ui startupUI, stdin io.Reader, timeout time.Duration) bool {
+	return promptStartupAction(ui, stdin, timeout) == startupActionStartTest
 }
 
 func startupModeConfirmationMessage(testMode bool) string {
@@ -439,13 +468,35 @@ func cliUsageText(exeName string) string {
 起動前の準備:
   1. 初回起動時に BOT_TOKEN を入力すると保存されます
   2. Windows では Credential Manager に安全に保存されます
-  3. 詳しい手順: %s
+  3. 保存済みトークンを変更したい場合は起動メニューの「トークンを上書きする」を使います
+  4. 詳しい手順: %s
 
 オプション:
   --help, -h    このヘルプを表示
   --version     バージョンを表示
   --test        動作確認用で起動（テスト用ダミーデータを使用）
 `, appName, exeName, guideURL)
+}
+
+func tokenStorageLocationLabel() string {
+	if runtimeGOOS == "windows" {
+		return "Windows Credential Manager"
+	}
+	return "この OS では資格情報ストアを利用できません"
+}
+
+func overwriteStoredToken(ui startupUI, stdin io.Reader) error {
+	fmt.Fprintln(ui.out)
+	fmt.Fprintf(ui.out, "  保存先: %s\n", tokenStorageLocationLabel())
+	token, err := promptBotToken(ui, stdin)
+	if err != nil {
+		return err
+	}
+	if err := saveTokenToStoreFn(token); err != nil {
+		return fmt.Errorf("トークンの保存に失敗しました: %w", err)
+	}
+	fmt.Fprintln(ui.out, "  保存済みトークンを更新しました。続けて起動方法を選択してください。")
+	return nil
 }
 
 func resolveToken(stdin io.Reader, ui startupUI) (string, error) {
@@ -529,7 +580,18 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	testMode := opts.testMode
 	if !testMode && hasInteractiveConsole(stdin, stdout) {
-		testMode = promptStartupMode(ui, stdin, 5*time.Second)
+		for {
+			action := promptStartupAction(ui, stdin, 5*time.Second)
+			if action == startupActionOverwriteToken {
+				if err := overwriteStoredToken(ui, stdin); err != nil {
+					ui.printErrorLine("起動に失敗しました: " + describeTokenError(err))
+					return 1
+				}
+				continue
+			}
+			testMode = action == startupActionStartTest
+			break
+		}
 	}
 	if testMode {
 		if err := os.Setenv("OW_CUSTOMMATCH_BOT_TEST_MODE", "true"); err != nil {
@@ -573,9 +635,11 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	ui.stepOK(3, 3, "Bot初期化")
 	log.Printf("[INFO] [3/3] Bot初期化 ... OK")
-	ui.ready()
-	log.Printf("[INFO] Discord接続を開始します。終了するには Ctrl+C を押してください。")
 	enableConsoleLogging(logFile, stdout, ui.style.enabled)
+	b.SetReadyNotifier(func() {
+		ui.ready()
+		log.Printf("[INFO] Discord との接続に成功しました。")
+	})
 
 	if err := b.Run(botToken); err != nil {
 		log.Printf("[ERROR] Bot実行エラー: %v", err)
