@@ -3,6 +3,11 @@
 !/bin/.gitkeep
 /dist/*
 !/dist/.gitkeep
+/ow-custommatch-bot.exe
 
 # local env
 **/.env
+
+# local scratch
+/.tmp/*
+!/.tmp/.gitkeep
