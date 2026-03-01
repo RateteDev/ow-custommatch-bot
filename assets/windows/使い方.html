@@ -290,6 +290,16 @@
     }
     a:hover { color: #70e8ff; }
 
+    h3 {
+      font-family: "Barlow Condensed", sans-serif;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--muted-hi);
+      margin: 24px 0 10px;
+    }
+
     /* ── Command table ── */
     .cmd-table {
       width: 100%;
@@ -473,10 +483,10 @@
         </table>
       </section>
 
-      <!-- ── 3. /match フロー ── -->
+      <!-- ── 3. /match ── -->
       <section class="card">
         <div class="card-num">3</div>
-        <h2><code>/match</code> 操作フロー</h2>
+        <h2><code>/match</code> 募集・チーム振り分け</h2>
         <ol>
           <li>発案者が <code>/match</code> を実行すると、募集パネルが投稿されます。</li>
           <li>同じチャンネルにすでに募集が開いている場合は、現在の募集を閉じて新しく始めるか、そのままキャンセルするかを選べます。</li>
@@ -490,9 +500,21 @@
           <li>10 人以上集まったら、発案者が「振り分け」を押します。チーム分け結果と VC 招待リンクが投稿されます。</li>
           <li>発案者は「中止」を押して募集を終了できます。</li>
         </ol>
+        <h3>振り分けの仕組み</h3>
+        <div class="panel-list">
+          <div class="note info">
+            5 の倍数人数でチームを編成します。端数は「余りメンバー」として別表示されます。
+          </div>
+          <div class="note info">
+            ランクスコアを基準に、できるだけバランスが取れるよう振り分けます。
+          </div>
+          <div class="note info">
+            「再振り分け」を押すことで、何度でも再抽選できます。
+          </div>
+        </div>
       </section>
 
-      <!-- ── 4. ランク登録 ── -->
+      <!-- ── 4. /register_rank ── -->
       <section class="card">
         <div class="card-num">4</div>
         <h2><code>/register_rank</code> ランク登録</h2>
@@ -509,19 +531,19 @@
         </div>
       </section>
 
-      <!-- ── 5. チーム分け ── -->
+      <!-- ── 5. /my_rank ── -->
       <section class="card">
         <div class="card-num">5</div>
-        <h2><code>/match</code> 振り分けの仕組み</h2>
+        <h2><code>/my_rank</code> ランク確認</h2>
         <div class="panel-list">
           <div class="note info">
-            5 の倍数人数でチームを編成します。端数は「余りメンバー」として別表示されます。
+            登録済みのランク・ディビジョン・有効期限を確認できます。
           </div>
           <div class="note info">
-            ランクスコアを基準に、できるだけバランスが取れるよう振り分けます。
+            ランクが未登録の場合は、その旨が表示されます。
           </div>
-          <div class="note info">
-            「再振り分け」を押すことで、何度でも再抽選できます。
+          <div class="note warn">
+            有効期限切れが近い場合は <code>/register_rank</code> で更新してください。
           </div>
         </div>
       </section>
