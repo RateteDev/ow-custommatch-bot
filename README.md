@@ -1,7 +1,7 @@
-# OW-CustomMtch-BO
+# OW-CustomMtch-BOT
 
 Overwatch のカスタムマッチ向けに、プレイヤー募集とチーム分けを行う Discord Bot です。
-![bot-icon](assets/icon.jpeg)
+<img src="assets/icon.jpeg" alt="bot-icon" width="120" />
 
 ## 前提
 
