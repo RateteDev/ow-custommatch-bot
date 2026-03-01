@@ -2,74 +2,13 @@ package main
 
 import (
 	"bytes"
-	"fmt"
+	"errors"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
-
-func writeTempFile(t *testing.T, dir, name, body string) string {
-	t.Helper()
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatalf("failed to write temp file: %v", err)
-	}
-	return path
-}
-
-func TestLoadEnvFileSuccess(t *testing.T) {
-	t.Setenv("BOT_TOKEN", "")
-	dir := t.TempDir()
-	path := writeTempFile(t, dir, ".env", "# comment\nBOT_TOKEN=test-token\n")
-
-	if err := loadEnvFile(path); err != nil {
-		t.Fatalf("loadEnvFile returned error: %v", err)
-	}
-
-	if got := os.Getenv("BOT_TOKEN"); got != "test-token" {
-		t.Fatalf("unexpected BOT_TOKEN: %s", got)
-	}
-}
-
-func TestLoadEnvFileErrors(t *testing.T) {
-	t.Run("missing file", func(t *testing.T) {
-		if err := loadEnvFile("does-not-exist.env"); err == nil {
-			t.Fatalf("expected error for missing file")
-		}
-	})
-
-	t.Run("invalid format", func(t *testing.T) {
-		dir := t.TempDir()
-		path := writeTempFile(t, dir, ".env", "INVALID_LINE")
-		if err := loadEnvFile(path); err == nil {
-			t.Fatalf("expected error for invalid format")
-		}
-	})
-}
-
-func TestRequiredEnv(t *testing.T) {
-	t.Setenv("BOT_TOKEN", "abc")
-	v, err := requiredEnv("BOT_TOKEN")
-	if err != nil {
-		t.Fatalf("requiredEnv returned error: %v", err)
-	}
-	if v != "abc" {
-		t.Fatalf("unexpected value: %s", v)
-	}
-
-	t.Setenv("BOT_TOKEN", "")
-	if _, err := requiredEnv("BOT_TOKEN"); err == nil {
-		t.Fatalf("expected error when env is empty")
-	}
-
-	t.Setenv("BOT_TOKEN", "YOUR_DISCORD_BOT_TOKEN")
-	if _, err := requiredEnv("BOT_TOKEN"); err == nil {
-		t.Fatalf("expected error when BOT_TOKEN is placeholder")
-	}
-}
 
 func TestPromptBotToken(t *testing.T) {
 	t.Run("正常入力", func(t *testing.T) {
@@ -95,13 +34,6 @@ func TestPromptBotToken(t *testing.T) {
 		}
 	})
 
-	t.Run("プレースホルダー入力", func(t *testing.T) {
-		ui := startupUI{out: &bytes.Buffer{}}
-		if _, err := promptBotToken(ui, strings.NewReader("YOUR_DISCORD_BOT_TOKEN\n")); err == nil {
-			t.Fatalf("expected error for placeholder input")
-		}
-	})
-
 	t.Run("EOF", func(t *testing.T) {
 		ui := startupUI{out: &bytes.Buffer{}}
 		if _, err := promptBotToken(ui, strings.NewReader("")); err == nil {
@@ -110,67 +42,49 @@ func TestPromptBotToken(t *testing.T) {
 	})
 }
 
-func TestSaveTokenToEnv(t *testing.T) {
-	t.Run(".env なし", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, ".env")
+func TestAppDataDir(t *testing.T) {
+	origGOOS := runtimeGOOS
+	t.Cleanup(func() {
+		runtimeGOOS = origGOOS
+	})
 
-		if err := saveTokenToEnv(path, "new-token"); err != nil {
-			t.Fatalf("saveTokenToEnv returned error: %v", err)
-		}
+	t.Run("windows with LOCALAPPDATA", func(t *testing.T) {
+		runtimeGOOS = "windows"
+		t.Setenv("LOCALAPPDATA", `C:\Users\tester\AppData\Local`)
 
-		body, err := os.ReadFile(path)
+		got, err := appDataDir(appName)
 		if err != nil {
-			t.Fatalf("failed to read env file: %v", err)
+			t.Fatalf("appDataDir returned error: %v", err)
 		}
-		if string(body) != "BOT_TOKEN=new-token\n" {
-			t.Fatalf("unexpected env content: %q", string(body))
+		want := filepath.Join(`C:\Users\tester\AppData\Local`, appName)
+		if got != want {
+			t.Fatalf("appDataDir = %q, want %q", got, want)
 		}
 	})
 
-	t.Run(".env あり BOT_TOKEN 行なし", func(t *testing.T) {
-		dir := t.TempDir()
-		path := writeTempFile(t, dir, ".env", "FOO=bar\n")
+	t.Run("windows without LOCALAPPDATA", func(t *testing.T) {
+		runtimeGOOS = "windows"
+		t.Setenv("LOCALAPPDATA", "")
 
-		if err := saveTokenToEnv(path, "appended-token"); err != nil {
-			t.Fatalf("saveTokenToEnv returned error: %v", err)
-		}
-
-		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("failed to read env file: %v", err)
-		}
-		if string(body) != "FOO=bar\nBOT_TOKEN=appended-token\n" {
-			t.Fatalf("unexpected env content: %q", string(body))
+		if _, err := appDataDir(appName); err == nil {
+			t.Fatalf("expected error when LOCALAPPDATA is empty")
 		}
 	})
 
-	t.Run(".env あり BOT_TOKEN 行あり", func(t *testing.T) {
-		dir := t.TempDir()
-		path := writeTempFile(t, dir, ".env", "BOT_TOKEN=YOUR_DISCORD_BOT_TOKEN\nFOO=bar\n")
+	t.Run("non-windows", func(t *testing.T) {
+		runtimeGOOS = "linux"
+		home := t.TempDir()
+		t.Setenv("HOME", home)
 
-		if err := saveTokenToEnv(path, "updated-token"); err != nil {
-			t.Fatalf("saveTokenToEnv returned error: %v", err)
-		}
-
-		body, err := os.ReadFile(path)
+		got, err := appDataDir(appName)
 		if err != nil {
-			t.Fatalf("failed to read env file: %v", err)
+			t.Fatalf("appDataDir returned error: %v", err)
 		}
-		if string(body) != "BOT_TOKEN=updated-token\nFOO=bar\n" {
-			t.Fatalf("unexpected env content: %q", string(body))
+		want := filepath.Join(home, ".local", "share", appName)
+		if got != want {
+			t.Fatalf("appDataDir = %q, want %q", got, want)
 		}
 	})
-}
-
-func TestExecutableDir(t *testing.T) {
-	dir, err := executableDir()
-	if err != nil {
-		t.Fatalf("executableDir returned error: %v", err)
-	}
-	if strings.TrimSpace(dir) == "" {
-		t.Fatalf("executableDir returned empty dir")
-	}
 }
 
 func TestParseCLIArgs(t *testing.T) {
@@ -213,11 +127,101 @@ func TestParseCLIArgs(t *testing.T) {
 
 func TestCLIUsageText(t *testing.T) {
 	text := cliUsageText("ow-custommatch-bot")
-	for _, want := range []string{"使い方", "--help", "--version", "--test", ".env", "BOT_TOKEN"} {
+	for _, want := range []string{"使い方", "--help", "--version", "--test", "BOT_TOKEN", "Credential Manager", guideURL} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("usage text missing %q: %s", want, text)
 		}
 	}
+}
+
+func TestTokenResolution(t *testing.T) {
+	origRead := readTokenFromStoreFn
+	origSave := saveTokenToStoreFn
+	origConsole := hasInteractiveConsole
+	t.Cleanup(func() {
+		readTokenFromStoreFn = origRead
+		saveTokenToStoreFn = origSave
+		hasInteractiveConsole = origConsole
+	})
+
+	t.Run("store hit", func(t *testing.T) {
+		readTokenFromStoreFn = func() (string, error) {
+			return "stored-token", nil
+		}
+		saveTokenToStoreFn = func(token string) error {
+			t.Fatalf("save should not be called, got %q", token)
+			return nil
+		}
+		hasInteractiveConsole = func(stdin io.Reader, stdout io.Writer) bool {
+			return false
+		}
+
+		got, err := resolveToken(strings.NewReader(""), startupUI{out: &bytes.Buffer{}})
+		if err != nil {
+			t.Fatalf("resolveToken returned error: %v", err)
+		}
+		if got != "stored-token" {
+			t.Fatalf("resolveToken = %q, want %q", got, "stored-token")
+		}
+	})
+
+	t.Run("store miss prompts and saves", func(t *testing.T) {
+		readTokenFromStoreFn = func() (string, error) {
+			return "", errTokenNotFound
+		}
+		saved := ""
+		saveTokenToStoreFn = func(token string) error {
+			saved = token
+			return nil
+		}
+		hasInteractiveConsole = func(stdin io.Reader, stdout io.Writer) bool {
+			return true
+		}
+
+		got, err := resolveToken(strings.NewReader("prompted-token\n"), startupUI{out: &bytes.Buffer{}})
+		if err != nil {
+			t.Fatalf("resolveToken returned error: %v", err)
+		}
+		if got != "prompted-token" {
+			t.Fatalf("resolveToken = %q, want %q", got, "prompted-token")
+		}
+		if saved != "prompted-token" {
+			t.Fatalf("saved token = %q, want %q", saved, "prompted-token")
+		}
+	})
+
+	t.Run("non interactive store miss", func(t *testing.T) {
+		readTokenFromStoreFn = func() (string, error) {
+			return "", errTokenNotFound
+		}
+		saveTokenToStoreFn = func(token string) error {
+			t.Fatalf("save should not be called, got %q", token)
+			return nil
+		}
+		hasInteractiveConsole = func(stdin io.Reader, stdout io.Writer) bool {
+			return false
+		}
+
+		if _, err := resolveToken(strings.NewReader(""), startupUI{out: &bytes.Buffer{}}); !errors.Is(err, errTokenNotFound) {
+			t.Fatalf("resolveToken error = %v, want errTokenNotFound", err)
+		}
+	})
+
+	t.Run("save failure", func(t *testing.T) {
+		readTokenFromStoreFn = func() (string, error) {
+			return "", errTokenNotFound
+		}
+		saveTokenToStoreFn = func(token string) error {
+			return errTokenStoreUnsupported
+		}
+		hasInteractiveConsole = func(stdin io.Reader, stdout io.Writer) bool {
+			return true
+		}
+
+		if _, err := resolveToken(strings.NewReader("prompted-token\n"), startupUI{out: &bytes.Buffer{}}); err == nil || !strings.Contains(err.Error(), "保存") {
+			t.Fatalf("expected save error, got %v", err)
+		}
+	})
 }
 
 func TestPromptStartupMode(t *testing.T) {
@@ -262,43 +266,24 @@ func TestPromptStartupMode(t *testing.T) {
 	})
 }
 
-func TestDescribeStartupError(t *testing.T) {
-	t.Run("missing env file", func(t *testing.T) {
-		msg := describeStartupError(filepath.Join("C:\\bot", ".env"), "BOT_TOKEN", dbFileName, fmt.Errorf("open env file: %w", os.ErrNotExist))
-		if !strings.Contains(msg, ".env") {
-			t.Fatalf("expected .env hint: %s", msg)
-		}
-		if !strings.Contains(msg, "BOT_TOKEN=") {
-			t.Fatalf("expected BOT_TOKEN example: %s", msg)
-		}
-		if !strings.Contains(msg, "使い方.html") {
-			t.Fatalf("expected guide hint: %s", msg)
-		}
-	})
-
-	t.Run("missing bot token", func(t *testing.T) {
-		msg := describeStartupError("dummy.env", "BOT_TOKEN", dbFileName, requiredEnvErr("BOT_TOKEN"))
+func TestDescribeTokenError(t *testing.T) {
+	t.Run("missing token", func(t *testing.T) {
+		msg := describeTokenError(errTokenNotFound)
 		if !strings.Contains(msg, "BOT_TOKEN") {
 			t.Fatalf("expected BOT_TOKEN hint: %s", msg)
 		}
-		if !strings.Contains(msg, "YOUR_DISCORD_BOT_TOKEN") {
-			t.Fatalf("expected placeholder hint: %s", msg)
-		}
-		if !strings.Contains(msg, "使い方.html") {
-			t.Fatalf("expected guide hint: %s", msg)
+		if !strings.Contains(msg, guideURL) {
+			t.Fatalf("expected guide URL hint: %s", msg)
 		}
 	})
 
-	t.Run("invalid env format", func(t *testing.T) {
-		msg := describeStartupError("dummy.env", "BOT_TOKEN", dbFileName, fmt.Errorf("invalid env format at line 1"))
-		if !strings.Contains(msg, "書式") {
-			t.Fatalf("expected format hint: %s", msg)
+	t.Run("unsupported store", func(t *testing.T) {
+		msg := describeTokenError(errTokenStoreUnsupported)
+		if !strings.Contains(msg, "OS") {
+			t.Fatalf("expected OS hint: %s", msg)
 		}
-		if !strings.Contains(msg, "KEY=VALUE") {
-			t.Fatalf("expected KEY=VALUE hint: %s", msg)
-		}
-		if !strings.Contains(msg, "使い方.html") {
-			t.Fatalf("expected guide hint: %s", msg)
+		if !strings.Contains(msg, guideURL) {
+			t.Fatalf("expected guide URL hint: %s", msg)
 		}
 	})
 }
@@ -310,7 +295,7 @@ func TestDetectColorEnabled(t *testing.T) {
 }
 
 func TestStyleConsoleLogLine(t *testing.T) {
-	line := "2026/02/25 20:00:00 [INFO] [2/4] 設定ファイル読込 ... OK\n"
+	line := "2026/02/25 20:00:00 [INFO] [2/3] トークン読込 ... OK\n"
 	styled := styleConsoleLogLine(line, ansiStyle{enabled: true})
 	if !strings.Contains(styled, "\x1b[") {
 		t.Fatalf("expected ANSI escape sequence in styled line: %q", styled)
@@ -323,13 +308,12 @@ func TestStyleConsoleLogLine(t *testing.T) {
 }
 
 func TestFormatErrorMessageText(t *testing.T) {
-	msg := "起動に失敗しました: 必須設定 BOT_TOKEN が未設定です。dummy.env に設定してください。`BOT_TOKEN=YOUR_DISCORD_BOT_TOKEN` のままでも未設定扱いです。\n詳しい手順は同じフォルダの 使い方.html をご確認ください。"
+	msg := "起動に失敗しました: BOT_TOKEN が保存されていません。初回起動時は対話入力で保存してください。詳しい手順は https://ratetedev.github.io/ow-custommatch-bot/ をご確認ください。"
 	got := formatErrorMessageText(msg)
 
 	wants := []string{
-		"未設定です。\n",
-		"設定してください。\n",
-		"未設定扱いです。\n",
+		"保存されていません。\n",
+		"保存してください。\n",
 		"ご確認ください。",
 	}
 	for _, want := range wants {
