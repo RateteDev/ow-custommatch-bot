@@ -39,6 +39,87 @@ var (
 	errTokenInputEmpty       = errors.New("bot token is empty")
 )
 
+func displayVersion(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "dev"
+	}
+	if strings.HasPrefix(raw, "dev-") || raw == "dev" {
+		return raw
+	}
+	if strings.HasPrefix(raw, "v") {
+		if base, ok := stripLegacyGitDescribeSuffix(raw); ok {
+			return base
+		}
+		return raw
+	}
+	if isPlainSemver(raw) {
+		return "v" + raw
+	}
+	if isHexCommit(raw) {
+		return "dev-" + raw
+	}
+	return raw
+}
+
+func stripLegacyGitDescribeSuffix(s string) (string, bool) {
+	dirtySuffix := "-dirty"
+	trimmed := s
+	if strings.HasSuffix(trimmed, dirtySuffix) {
+		trimmed = strings.TrimSuffix(trimmed, dirtySuffix)
+	}
+
+	lastDash := strings.LastIndexByte(trimmed, '-')
+	if lastDash <= 0 || lastDash+2 >= len(trimmed) || trimmed[lastDash+1] != 'g' {
+		return "", false
+	}
+	if !isHexCommit(trimmed[lastDash+2:]) {
+		return "", false
+	}
+
+	countDash := strings.LastIndexByte(trimmed[:lastDash], '-')
+	if countDash <= 0 {
+		return "", false
+	}
+	for i := countDash + 1; i < lastDash; i++ {
+		if trimmed[i] < '0' || trimmed[i] > '9' {
+			return "", false
+		}
+	}
+
+	return trimmed[:countDash], true
+}
+
+func isPlainSemver(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	for i := 0; i < len(s); i++ {
+		if (s[i] < '0' || s[i] > '9') && s[i] != '.' {
+			return false
+		}
+	}
+	return strings.Contains(s, ".")
+}
+
+func isHexCommit(s string) bool {
+	if len(s) < 7 || len(s) > 40 {
+		return false
+	}
+
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] >= '0' && s[i] <= '9':
+		case s[i] >= 'a' && s[i] <= 'f':
+		case s[i] >= 'A' && s[i] <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 type cliOptions struct {
 	showHelp    bool
 	showVersion bool
@@ -89,10 +170,11 @@ func newStartupUI(out, err io.Writer) startupUI {
 }
 
 func (ui startupUI) printBanner(ver string) {
+	ver = displayVersion(ver)
 	fmt.Fprintln(ui.out)
 	fmt.Fprintln(ui.out, ui.style.magenta("+- OW CUSTOMMATCH BOT --------------------------------------+"))
 	fmt.Fprintf(ui.out, "  %s\n", ui.style.bold("OW CUSTOMMATCH BOT"))
-	fmt.Fprintf(ui.out, "  %s %s\n", ui.style.cyan("Version:"), ui.style.dim("v"+ver))
+	fmt.Fprintf(ui.out, "  %s %s\n", ui.style.cyan("Version:"), ui.style.dim(ver))
 	fmt.Fprintf(ui.out, "  %s %s\n", ui.style.cyan("使い方:"), guideURL)
 	fmt.Fprintln(ui.out, ui.style.magenta("+-----------------------------------------------------------+"))
 	fmt.Fprintln(ui.out)
@@ -362,49 +444,59 @@ func promptBotToken(ui startupUI, stdin io.Reader) (string, error) {
 	return token, nil
 }
 
-func promptStartupAction(ui startupUI, stdin io.Reader, timeout time.Duration) startupAction {
+func (ui startupUI) formatStartupActionLine(action startupAction, label string) string {
+	switch action {
+	case startupActionStartProd:
+		return ui.style.green(label)
+	case startupActionStartTest:
+		return ui.style.yellow(label)
+	case startupActionOverwriteToken:
+		return ui.style.cyan(label)
+	default:
+		return label
+	}
+}
+
+func (ui startupUI) printStartupActionMenu() {
 	fmt.Fprintln(ui.out)
 	fmt.Fprintln(ui.out, ui.style.bold("  起動方法を選択してください"))
 	fmt.Fprintln(ui.out, "  普段そのままお使いになる場合は [1] を選んでください。")
 	fmt.Fprintln(ui.out, "  表示確認や試運転をしたい場合は [2] を選んでください。")
 	fmt.Fprintln(ui.out, "  保存済みトークンを更新したい場合は [3] を選んでください。")
 	fmt.Fprintln(ui.out)
-	fmt.Fprintln(ui.out, "    [1] 通常運用")
+	fmt.Fprintln(ui.out, "    "+ui.formatStartupActionLine(startupActionStartProd, "[1] 通常運用"))
 	fmt.Fprintln(ui.out, "        実際の運用として起動します。")
-	fmt.Fprintln(ui.out, "    [2] 動作確認用")
+	fmt.Fprintln(ui.out, "    "+ui.formatStartupActionLine(startupActionStartTest, "[2] 動作確認用"))
 	fmt.Fprintln(ui.out, "        テスト用ダミーデータで画面や流れを確認できます。")
-	fmt.Fprintln(ui.out, "    [3] トークンを上書きする")
+	fmt.Fprintln(ui.out, "    "+ui.formatStartupActionLine(startupActionOverwriteToken, "[3] トークンを上書きする"))
 	fmt.Fprintf(ui.out, "        保存先: %s\n", tokenStorageLocationLabel())
 	fmt.Fprintln(ui.out)
-	fmt.Fprintln(ui.out, "  Enterキーですぐに通常運用を開始できます。")
-	fmt.Fprintf(ui.out, "  未入力の場合は%d秒後に自動で通常運用を開始します。> ", int(timeout.Seconds()))
+	fmt.Fprint(ui.out, "  Enterキーで通常運用を開始できます。> ")
+}
 
-	ch := make(chan string, 1)
-	go func() {
-		scanner := bufio.NewScanner(stdin)
-		if scanner.Scan() {
-			ch <- strings.TrimSpace(scanner.Text())
-		}
-		close(ch)
-	}()
-
-	select {
-	case input, ok := <-ch:
+func promptStartupAction(ui startupUI, stdin io.Reader, _ time.Duration) startupAction {
+	reader := bufio.NewReader(stdin)
+	for {
+		ui.printStartupActionMenu()
+		line, err := reader.ReadString('\n')
 		fmt.Fprintln(ui.out)
-		if !ok {
+		if err != nil && err != io.EOF {
 			return startupActionStartProd
 		}
+		input := strings.TrimSpace(line)
 		switch input {
+		case "", "1":
+			return startupActionStartProd
 		case "2":
 			return startupActionStartTest
 		case "3":
 			return startupActionOverwriteToken
-		default:
+		}
+		if err == io.EOF {
 			return startupActionStartProd
 		}
-	case <-time.After(timeout):
+		ui.printErrorLine("1 / 2 / 3 / Enter のいずれかを入力してください")
 		fmt.Fprintln(ui.out)
-		return startupActionStartProd
 	}
 }
 
@@ -553,7 +645,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if opts.showVersion {
-		fmt.Fprintf(stdout, "%s %s\n", appName, version)
+		fmt.Fprintf(stdout, "%s %s\n", appName, displayVersion(version))
 		return 0
 	}
 

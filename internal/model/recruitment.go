@@ -18,14 +18,15 @@ type ScoredPlayer struct {
 }
 
 type Recruitment struct {
-	Entries     []Entry
-	RankData    RankDataFile
-	OrganizerID string // 発案者の Discord UserID
-	MessageID   string // Discord メッセージID（Embed 更新用）
-	ChannelID   string // チャンネルID
-	GuildID     string // サーバーID
-	IsOpen      bool   // 募集中かどうか
-	HasAssigned bool   // 振り分け結果を一度でも送信したか
+	Entries          []Entry
+	RankData         RankDataFile
+	OrganizerID      string // 発案者の Discord UserID
+	MessageID        string // Discord メッセージID（Embed 更新用）
+	ChannelID        string // チャンネルID
+	GuildID          string // サーバーID
+	IsOpen           bool   // 募集中かどうか
+	HasAssigned      bool   // 振り分け結果を一度でも送信したか
+	AssignInProgress bool   // 振り分け処理中かどうか
 }
 
 func NewRecruitment(rankData RankDataFile) *Recruitment {

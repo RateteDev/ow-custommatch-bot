@@ -54,3 +54,9 @@
 - `go test ./cmd/ow-custommatch-bot/...`
 - `make build` 後に起動バナーの表示を確認
 - `./bin/ow-custommatch-bot --version` の表示が簡潔になっていることを確認
+
+## 結果
+
+- 2026-03-01: 完了
+- 利用者向け表示用の正規化処理を追加し、バナーと `--version` は `v1.0.0`、`dev-<sha>`、prerelease tag を自然に表示し、二重 `v` や legacy `git describe` 接尾辞を出さないよう更新済み
+- `cmd/ow-custommatch-bot/main_test.go` に tag / prerelease / `dev-<sha>` / legacy describe / raw short sha の表示回帰を追加し、`go test ./cmd/ow-custommatch-bot/...` で確認済み

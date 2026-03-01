@@ -228,6 +228,30 @@ func (b *Bot) deleteRecruitment(channelID string) {
 	delete(b.recruitments, channelID)
 }
 
+func (b *Bot) tryStartAssign(channelID string) bool {
+	b.recruitmentsMu.Lock()
+	defer b.recruitmentsMu.Unlock()
+
+	r, ok := b.recruitments[channelID]
+	if !ok || !r.IsOpen || r.AssignInProgress {
+		return false
+	}
+
+	r.AssignInProgress = true
+	return true
+}
+
+func (b *Bot) finishAssign(channelID string) {
+	b.recruitmentsMu.Lock()
+	defer b.recruitmentsMu.Unlock()
+
+	r, ok := b.recruitments[channelID]
+	if !ok {
+		return
+	}
+	r.AssignInProgress = false
+}
+
 func (b *Bot) startRecruitment(guildID, channelID, organizerID string) (*model.Recruitment, bool) {
 	b.recruitmentsMu.Lock()
 	defer b.recruitmentsMu.Unlock()
@@ -620,9 +644,27 @@ func (b *Bot) handleAssign(s *discordgo.Session, i *discordgo.InteractionCreate)
 		return
 	}
 
-	// VC準備・招待リンク生成で3秒制限を超えやすいため、先にインタラクションを受理する。
-	if err := b.ackInteraction(s, i); err != nil {
-		log.Printf("failed to defer assign interaction: %v", err)
+	if !b.tryStartAssign(channelID) {
+		if err := b.respondEphemeralText(s, i, "現在振り分け中です"); err != nil {
+			log.Printf("failed to respond assign in progress: %v", err)
+		}
+		return
+	}
+	defer func() {
+		b.finishAssign(channelID)
+		if err := b.updateRecruitEmbed(s, r, false); err != nil {
+			log.Printf("failed to restore recruit embed after assign: %v", err)
+		}
+	}()
+
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseUpdateMessage,
+		Data: &discordgo.InteractionResponseData{
+			Embeds:     []*discordgo.MessageEmbed{buildRecruitEmbed(r, "🎮 マッチング募集", 0x2ECC71)},
+			Components: b.buildRecruitComponents(r, false),
+		},
+	}); err != nil {
+		log.Printf("failed to update recruit embed to assign in progress: %v", err)
 		return
 	}
 
@@ -717,9 +759,6 @@ func (b *Bot) handleAssign(s *discordgo.Session, i *discordgo.InteractionCreate)
 	}
 
 	r.HasAssigned = true
-	if err := b.updateRecruitEmbed(s, r, false); err != nil {
-		log.Printf("failed to update recruit embed after assign result post: %v", err)
-	}
 }
 
 func (b *Bot) ensureVCChannels(s *discordgo.Session, guildID string, teamCount int) ([]string, error) {
@@ -945,7 +984,11 @@ func recruitParticipantList(r *model.Recruitment) string {
 
 func (b *Bot) buildRecruitComponents(r *model.Recruitment, disabled bool) []discordgo.MessageComponent {
 	assignLabel := "🎲 振り分け"
-	if r != nil && r.HasAssigned {
+	assignDisabled := disabled || r == nil || len(r.Entries) < 10
+	if r != nil && r.AssignInProgress {
+		assignLabel = "🤖 計算中"
+		assignDisabled = true
+	} else if r != nil && r.HasAssigned {
 		assignLabel = "🔁 再振り分け"
 	}
 	return []discordgo.MessageComponent{
@@ -971,7 +1014,7 @@ func (b *Bot) buildRecruitComponents(r *model.Recruitment, disabled bool) []disc
 					Label:    assignLabel,
 					CustomID: "assign",
 					Style:    discordgo.DangerButton,
-					Disabled: disabled || r == nil || len(r.Entries) < 10,
+					Disabled: assignDisabled,
 				},
 				discordgo.Button{
 					Label:    "🚫 中止",

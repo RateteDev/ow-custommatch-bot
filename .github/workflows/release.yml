@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -19,7 +21,7 @@ jobs:
         run: go test ./...
 
       - name: Build Windows exe
-        run: make release-win-exe VERSION=${{ github.ref_name }}
+        run: make release-win-exe
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

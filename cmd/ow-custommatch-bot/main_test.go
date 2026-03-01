@@ -134,6 +134,70 @@ func TestCLIUsageText(t *testing.T) {
 	}
 }
 
+func TestRunShowVersion(t *testing.T) {
+	origVersion := version
+	t.Cleanup(func() {
+		version = origVersion
+	})
+
+	tests := []struct {
+		name    string
+		version string
+		want    string
+	}{
+		{name: "tag version", version: "v1.2.3", want: appName + " v1.2.3\n"},
+		{name: "prerelease rc tag version", version: "v1.2.3-rc1", want: appName + " v1.2.3-rc1\n"},
+		{name: "prerelease beta tag version", version: "v1.2.3-beta.1", want: appName + " v1.2.3-beta.1\n"},
+		{name: "dev sha version", version: "dev-abcdef0", want: appName + " dev-abcdef0\n"},
+		{name: "legacy git describe version", version: "v1.2.3-30-gabcdef0", want: appName + " v1.2.3\n"},
+		{name: "raw short sha version", version: "abcdef0", want: appName + " dev-abcdef0\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			version = tt.version
+
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := run([]string{"--version"}, strings.NewReader(""), &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("run(--version) exit code = %d, want 0", code)
+			}
+			if stdout.String() != tt.want {
+				t.Fatalf("run(--version) output = %q, want %q", stdout.String(), tt.want)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("run(--version) stderr = %q, want empty", stderr.String())
+			}
+		})
+	}
+}
+
+func TestDisplayVersion(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "tag version", raw: "v1.2.3", want: "v1.2.3"},
+		{name: "prerelease rc tag version", raw: "v1.2.3-rc1", want: "v1.2.3-rc1"},
+		{name: "prerelease beta tag version", raw: "v1.2.3-beta.1", want: "v1.2.3-beta.1"},
+		{name: "dev sha version", raw: "dev-abcdef0", want: "dev-abcdef0"},
+		{name: "legacy git describe version", raw: "v1.2.3-30-gabcdef0", want: "v1.2.3"},
+		{name: "legacy git describe dirty version", raw: "v1.2.3-30-gabcdef0-dirty", want: "v1.2.3"},
+		{name: "raw short sha version", raw: "abcdef0", want: "dev-abcdef0"},
+		{name: "empty version", raw: "", want: "dev"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := displayVersion(tt.raw); got != tt.want {
+				t.Fatalf("displayVersion(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTokenResolution(t *testing.T) {
 	origRead := readTokenFromStoreFn
 	origSave := saveTokenToStoreFn
@@ -234,9 +298,14 @@ func TestPromptStartupMode(t *testing.T) {
 			t.Fatalf("expected test mode to be selected")
 		}
 		output := out.String()
-		for _, want := range []string{"通常運用", "動作確認用", "Enterキーですぐに通常運用", "自動で通常運用を開始します"} {
+		for _, want := range []string{"通常運用", "動作確認用", "Enterキーで通常運用を開始できます"} {
 			if !strings.Contains(output, want) {
 				t.Fatalf("prompt output missing %q: %q", want, output)
+			}
+		}
+		for _, unwanted := range []string{"自動で通常運用を開始します", "未入力の場合は"} {
+			if strings.Contains(output, unwanted) {
+				t.Fatalf("prompt output should not contain %q: %q", unwanted, output)
 			}
 		}
 		for _, unwanted := range []string{"本番モード", "テストモード"} {
@@ -263,18 +332,6 @@ func TestPromptStartupMode(t *testing.T) {
 			t.Fatalf("expected empty input to select production mode")
 		}
 	})
-
-	t.Run("timeout", func(t *testing.T) {
-		ui := startupUI{out: &bytes.Buffer{}}
-		reader, writer := io.Pipe()
-		defer reader.Close()
-		defer writer.Close()
-
-		got := promptStartupMode(ui, reader, time.Millisecond)
-		if got {
-			t.Fatalf("expected timeout to select production mode")
-		}
-	})
 }
 
 func TestPromptStartupAction(t *testing.T) {
@@ -294,30 +351,129 @@ func TestPromptStartupAction(t *testing.T) {
 		}
 	})
 
-	t.Run("タイムアウト時は通常運用", func(t *testing.T) {
+	t.Run("無効入力後に再入力できる", func(t *testing.T) {
+		var out bytes.Buffer
+		ui := startupUI{out: &out, err: &out}
+
+		got := promptStartupAction(ui, strings.NewReader("4\nabc\n2\n"), 50*time.Millisecond)
+		if got != startupActionStartTest {
+			t.Fatalf("promptStartupAction() = %v, want %v", got, startupActionStartTest)
+		}
+		output := out.String()
+		if strings.Count(output, "起動方法を選択してください") < 3 {
+			t.Fatalf("prompt should be shown again after invalid input: %q", output)
+		}
+		if !strings.Contains(output, "1 / 2 / 3 / Enter のいずれかを入力してください") {
+			t.Fatalf("prompt output missing invalid input guidance: %q", output)
+		}
+	})
+
+	t.Run("自動起動しない", func(t *testing.T) {
 		ui := startupUI{out: &bytes.Buffer{}}
 		reader, writer := io.Pipe()
 		defer reader.Close()
-		defer writer.Close()
+		done := make(chan startupAction, 1)
 
-		got := promptStartupAction(ui, reader, time.Millisecond)
-		if got != startupActionStartProd {
-			t.Fatalf("promptStartupAction() = %v, want %v", got, startupActionStartProd)
+		go func() {
+			done <- promptStartupAction(ui, reader, time.Millisecond)
+		}()
+
+		select {
+		case got := <-done:
+			t.Fatalf("promptStartupAction() returned unexpectedly: %v", got)
+		case <-time.After(20 * time.Millisecond):
+		}
+
+		if err := writer.Close(); err != nil {
+			t.Fatalf("writer.Close() error = %v", err)
+		}
+
+		select {
+		case got := <-done:
+			if got != startupActionStartProd {
+				t.Fatalf("promptStartupAction() after EOF = %v, want %v", got, startupActionStartProd)
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Fatalf("promptStartupAction() did not finish after EOF")
+		}
+	})
+}
+
+func TestStartupUIPrintStartupActionMenu(t *testing.T) {
+	t.Run("非カラーでは従来どおり読める", func(t *testing.T) {
+		var out bytes.Buffer
+		ui := startupUI{out: &out}
+
+		ui.printStartupActionMenu()
+
+		got := out.String()
+		want := "\n" +
+			"  起動方法を選択してください\n" +
+			"  普段そのままお使いになる場合は [1] を選んでください。\n" +
+			"  表示確認や試運転をしたい場合は [2] を選んでください。\n" +
+			"  保存済みトークンを更新したい場合は [3] を選んでください。\n" +
+			"\n" +
+			"    [1] 通常運用\n" +
+			"        実際の運用として起動します。\n" +
+			"    [2] 動作確認用\n" +
+			"        テスト用ダミーデータで画面や流れを確認できます。\n" +
+			"    [3] トークンを上書きする\n" +
+			"        保存先: " + tokenStorageLocationLabel() + "\n" +
+			"\n" +
+			"  Enterキーで通常運用を開始できます。> "
+		if got != want {
+			t.Fatalf("plain menu output mismatch:\n got: %q\nwant: %q", got, want)
+		}
+		if strings.Contains(got, "\x1b[") {
+			t.Fatalf("plain menu should not contain ANSI escape sequences: %q", got)
+		}
+	})
+
+	t.Run("カラー有効時は選択肢ごとに色分けされる", func(t *testing.T) {
+		var out bytes.Buffer
+		ui := startupUI{out: &out, style: ansiStyle{enabled: true}}
+
+		ui.printStartupActionMenu()
+
+		got := out.String()
+		for _, want := range []string{
+			"    \x1b[32m[1] 通常運用\x1b[0m\n",
+			"    \x1b[33m[2] 動作確認用\x1b[0m\n",
+			"    \x1b[36m[3] トークンを上書きする\x1b[0m\n",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("colored menu output missing %q: %q", want, got)
+			}
 		}
 	})
 }
 
 func TestStartupUIPrintBanner(t *testing.T) {
-	var out bytes.Buffer
-	ui := startupUI{out: &out}
+	tests := []struct {
+		name    string
+		version string
+		want    string
+	}{
+		{name: "tag version", version: "v1.2.3", want: "Version: v1.2.3"},
+		{name: "dev sha version", version: "dev-abcdef0", want: "Version: dev-abcdef0"},
+		{name: "legacy git describe version", version: "v1.2.3-30-gabcdef0", want: "Version: v1.2.3"},
+		{name: "raw short sha version", version: "abcdef0", want: "Version: dev-abcdef0"},
+	}
 
-	ui.printBanner("1.2.3")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			ui := startupUI{out: &out}
 
-	got := out.String()
-	for _, want := range []string{"OW CUSTOMMATCH BOT", "Version: v1.2.3", "使い方: " + guideURL} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("banner output missing %q: %q", want, got)
-		}
+			ui.printBanner(tt.version)
+
+			got := out.String()
+			for _, want := range []string{"OW CUSTOMMATCH BOT", tt.want, "使い方: " + guideURL} {
+				if !strings.Contains(got, want) {
+					t.Fatalf("banner output missing %q: %q", want, got)
+				}
+			}
+		})
 	}
 }
 

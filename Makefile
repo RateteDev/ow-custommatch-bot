@@ -12,8 +12,24 @@ WIN_BIN_PATH := $(BIN_DIR)/$(APP_NAME).exe
 DIST_DIR := dist
 # Release 用 exe のコピー先です。
 WIN_RELEASE_EXE := $(DIST_DIR)/$(APP_NAME).exe
-# バージョン文字列です。tag がなければ commit を使います。
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+# バージョン文字列です。未指定時は exact tag -> dev-<shortsha> -> dev の順で解決します。
+VERSION_FROM_GIT = $(shell \
+	if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
+		tag=$$(git describe --tags --exact-match 2>/dev/null); \
+		if [ -n "$$tag" ]; then \
+			printf '%s' "$$tag"; \
+		else \
+			sha=$$(git rev-parse --short HEAD 2>/dev/null); \
+			if [ -n "$$sha" ]; then \
+				printf 'dev-%s' "$$sha"; \
+			else \
+				printf 'dev'; \
+			fi; \
+		fi; \
+	else \
+		printf 'dev'; \
+	fi)
+VERSION ?= $(VERSION_FROM_GIT)
 # バージョン埋め込み用の ldflags です。
 LDFLAGS := -X main.version=$(VERSION)
 

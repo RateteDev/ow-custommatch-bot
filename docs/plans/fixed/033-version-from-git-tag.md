@@ -63,3 +63,10 @@
 - `make build` 後に `--version` を確認
 - テスト用タグを切った状態で `make build` し、タグ名が反映されることを確認
 - `release.yml` が Tag 起点の成果物名になっていることを確認
+
+## 結果
+
+- 2026-03-01: 完了
+- `Makefile` の `VERSION` 解決は exact tag を優先し、タグなしでは `dev-<shortsha>`、`git` 利用不可時のみ `dev` を返す単一起点へ整理済み
+- `.github/workflows/release.yml` は `make release-win-exe` に統一し、Tag 解決に必要な `fetch-depth: 0` を追加済み
+- `README.md` に正式版は Git Tag 起点、開発ビルドは `dev-<shortsha>` 形式であることを追記し、`go test ./cmd/ow-custommatch-bot/...` と `make` の dry-run/実ビルドで確認済み

@@ -1,6 +1,9 @@
 package bot
 
 import (
+	"encoding/json"
+	"io"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -159,6 +162,85 @@ func TestBuildRecruitComponentsAssignButtonDisabledByEntryCount(t *testing.T) {
 			t.Fatalf("assign button should be enabled when entries are 10 or more")
 		}
 	})
+}
+
+func TestBuildRecruitComponentsAssignButtonLabels(t *testing.T) {
+	rankData, err := model.LoadEmbeddedRankData()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedRankData failed: %v", err)
+	}
+
+	b := &Bot{rankData: rankData}
+	r := model.NewRecruitment(rankData)
+	r.Entries = make([]model.Entry, 10)
+
+	t.Run("初回は通常ラベル", func(t *testing.T) {
+		assignButton := findAssignButton(t, b.buildRecruitComponents(r, false))
+		if assignButton.Label != "🎲 振り分け" {
+			t.Fatalf("assign button label = %q, want %q", assignButton.Label, "🎲 振り分け")
+		}
+		if assignButton.Disabled {
+			t.Fatalf("assign button should be enabled")
+		}
+	})
+
+	t.Run("振り分け中は計算中ラベルで無効", func(t *testing.T) {
+		r.AssignInProgress = true
+		assignButton := findAssignButton(t, b.buildRecruitComponents(r, false))
+		if assignButton.Label != "🤖 計算中" {
+			t.Fatalf("assign button label = %q, want %q", assignButton.Label, "🤖 計算中")
+		}
+		if !assignButton.Disabled {
+			t.Fatalf("assign button should be disabled while assign is in progress")
+		}
+		r.AssignInProgress = false
+	})
+
+	t.Run("振り分け済みは再振り分けラベル", func(t *testing.T) {
+		r.HasAssigned = true
+		assignButton := findAssignButton(t, b.buildRecruitComponents(r, false))
+		if assignButton.Label != "🔁 再振り分け" {
+			t.Fatalf("assign button label = %q, want %q", assignButton.Label, "🔁 再振り分け")
+		}
+		if assignButton.Disabled {
+			t.Fatalf("assign button should be enabled after assign completion")
+		}
+	})
+}
+
+func TestTryStartAssignGuardsDuplicateExecution(t *testing.T) {
+	rankData, err := model.LoadEmbeddedRankData()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedRankData failed: %v", err)
+	}
+
+	r := model.NewRecruitment(rankData)
+	r.ChannelID = "channel-1"
+	r.IsOpen = true
+	b := &Bot{
+		recruitments: map[string]*model.Recruitment{
+			"channel-1": r,
+		},
+	}
+
+	if !b.tryStartAssign("channel-1") {
+		t.Fatalf("first tryStartAssign should succeed")
+	}
+	if !r.AssignInProgress {
+		t.Fatalf("AssignInProgress should be true after first tryStartAssign")
+	}
+	if b.tryStartAssign("channel-1") {
+		t.Fatalf("second tryStartAssign should be rejected")
+	}
+
+	b.finishAssign("channel-1")
+
+	if r.AssignInProgress {
+		t.Fatalf("AssignInProgress should be false after finishAssign")
+	}
+	if !b.tryStartAssign("channel-1") {
+		t.Fatalf("tryStartAssign should succeed again after finishAssign")
+	}
 }
 
 func TestStartRecruitmentKeepsStatePerChannelWithinSameGuild(t *testing.T) {
@@ -506,6 +588,304 @@ func TestRollbackMatchRestart(t *testing.T) {
 	}
 }
 
+func TestHandleAssignRejectsWhenAssignAlreadyInProgress(t *testing.T) {
+	rankData, err := model.LoadEmbeddedRankData()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedRankData failed: %v", err)
+	}
+
+	r := model.NewRecruitment(rankData)
+	r.ChannelID = "channel-1"
+	r.IsOpen = true
+	r.OrganizerID = "organizer-1"
+	r.AssignInProgress = true
+
+	var requests []recordedRequest
+	session := newTestDiscordSession(t, func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		requests = append(requests, recordedRequest{
+			Method: req.Method,
+			Path:   req.URL.Path,
+			Body:   body,
+		})
+		return jsonHTTPResponse(`{}`), nil
+	})
+
+	b := &Bot{
+		rankData: rankData,
+		recruitments: map[string]*model.Recruitment{
+			"channel-1": r,
+		},
+	}
+
+	b.handleAssign(session, newAssignInteraction("channel-1", "organizer-1"))
+
+	if len(requests) != 1 {
+		t.Fatalf("len(requests) = %d, want 1", len(requests))
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(requests[0].Body, &payload); err != nil {
+		t.Fatalf("failed to decode response payload: %v", err)
+	}
+	if got := int(payload["type"].(float64)); got != int(discordgo.InteractionResponseChannelMessageWithSource) {
+		t.Fatalf("response type = %d, want %d", got, discordgo.InteractionResponseChannelMessageWithSource)
+	}
+	data := payload["data"].(map[string]any)
+	if got := data["content"].(string); got != "現在振り分け中です" {
+		t.Fatalf("content = %q, want %q", got, "現在振り分け中です")
+	}
+	if got := int(data["flags"].(float64)); got != int(discordgo.MessageFlagsEphemeral) {
+		t.Fatalf("flags = %d, want %d", got, discordgo.MessageFlagsEphemeral)
+	}
+}
+
+func TestHandleAssignRestoresAssignButtonAfterFailure(t *testing.T) {
+	rankData, err := model.LoadEmbeddedRankData()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedRankData failed: %v", err)
+	}
+
+	tests := []struct {
+		name             string
+		initialAssigned  bool
+		wantRestoreLabel string
+	}{
+		{
+			name:             "初回失敗なら通常ラベルへ戻す",
+			initialAssigned:  false,
+			wantRestoreLabel: "🎲 振り分け",
+		},
+		{
+			name:             "再振り分け失敗なら再振り分けラベルへ戻す",
+			initialAssigned:  true,
+			wantRestoreLabel: "🔁 再振り分け",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := model.NewRecruitment(rankData)
+			r.ChannelID = "channel-1"
+			r.MessageID = "message-1"
+			r.GuildID = "guild-1"
+			r.IsOpen = true
+			r.OrganizerID = "organizer-1"
+			r.HasAssigned = tc.initialAssigned
+
+			testDummies := make(map[string]model.PlayerInfo, 10)
+			for i := 0; i < 10; i++ {
+				userID := "dummy-" + teamLabel(i)
+				r.AddEntry(userID, "Dummy "+teamLabel(i))
+				testDummies[userID] = model.PlayerInfo{
+					ID:   userID,
+					Name: "Dummy " + teamLabel(i),
+				}
+			}
+
+			var requests []recordedRequest
+			session := newTestDiscordSession(t, func(req *http.Request) (*http.Response, error) {
+				body, err := io.ReadAll(req.Body)
+				if err != nil {
+					return nil, err
+				}
+				requests = append(requests, recordedRequest{
+					Method: req.Method,
+					Path:   req.URL.Path,
+					Body:   body,
+				})
+
+				switch {
+				case req.Method == http.MethodPost && strings.Contains(req.URL.Path, "/interactions/"):
+					return jsonHTTPResponse(`{}`), nil
+				case req.Method == http.MethodPost && strings.Contains(req.URL.Path, "/webhooks/"):
+					return jsonHTTPResponse(`{"id":"followup-1"}`), nil
+				case req.Method == http.MethodPatch && req.URL.Path == "/api/v9/channels/channel-1/messages/message-1":
+					return jsonHTTPResponse(`{"id":"message-1"}`), nil
+				default:
+					t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+					return nil, nil
+				}
+			})
+
+			b := &Bot{
+				rankData: rankData,
+				recruitments: map[string]*model.Recruitment{
+					"channel-1": r,
+				},
+				testDummies: map[string]map[string]model.PlayerInfo{
+					"channel-1": testDummies,
+				},
+			}
+
+			b.handleAssign(session, newAssignInteraction("channel-1", "organizer-1"))
+
+			if len(requests) != 3 {
+				t.Fatalf("len(requests) = %d, want 3", len(requests))
+			}
+
+			initialPayload := decodeJSONMap(t, requests[0].Body)
+			if got := int(initialPayload["type"].(float64)); got != int(discordgo.InteractionResponseUpdateMessage) {
+				t.Fatalf("initial response type = %d, want %d", got, discordgo.InteractionResponseUpdateMessage)
+			}
+			initialData := initialPayload["data"].(map[string]any)
+			label, disabled := extractAssignButtonState(t, initialData)
+			if label != "🤖 計算中" {
+				t.Fatalf("initial assign button label = %q, want %q", label, "🤖 計算中")
+			}
+			if !disabled {
+				t.Fatalf("initial assign button should be disabled")
+			}
+
+			followupPayload := decodeJSONMap(t, requests[1].Body)
+			if got := followupPayload["content"].(string); got != "VCチャンネルの準備に失敗しました" {
+				t.Fatalf("followup content = %q, want %q", got, "VCチャンネルの準備に失敗しました")
+			}
+
+			restorePayload := decodeJSONMap(t, requests[2].Body)
+			label, disabled = extractAssignButtonState(t, restorePayload)
+			if label != tc.wantRestoreLabel {
+				t.Fatalf("restored assign button label = %q, want %q", label, tc.wantRestoreLabel)
+			}
+			if disabled {
+				t.Fatalf("restored assign button should be enabled")
+			}
+			if r.AssignInProgress {
+				t.Fatalf("AssignInProgress should be false after handleAssign returns")
+			}
+		})
+	}
+}
+
+func TestHandleAssignRestoresReassignButtonAfterSuccess(t *testing.T) {
+	rankData, err := model.LoadEmbeddedRankData()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedRankData failed: %v", err)
+	}
+
+	vcConfig := model.NewVCConfigManager(filepath.Join(t.TempDir(), "vc-config.json"))
+	if err := vcConfig.Load(); err != nil {
+		t.Fatalf("vcConfig.Load failed: %v", err)
+	}
+
+	r := model.NewRecruitment(rankData)
+	r.ChannelID = "channel-1"
+	r.MessageID = "message-1"
+	r.GuildID = "guild-1"
+	r.IsOpen = true
+	r.OrganizerID = "organizer-1"
+
+	testDummies := make(map[string]model.PlayerInfo, 10)
+	for i := 0; i < 10; i++ {
+		userID := "dummy-" + teamLabel(i)
+		r.AddEntry(userID, "Dummy "+teamLabel(i))
+		testDummies[userID] = model.PlayerInfo{
+			ID:   userID,
+			Name: "Dummy " + teamLabel(i),
+		}
+	}
+
+	var (
+		mu       sync.Mutex
+		requests []recordedRequest
+	)
+	session := newTestDiscordSession(t, func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		mu.Lock()
+		requests = append(requests, recordedRequest{
+			Method: req.Method,
+			Path:   req.URL.Path,
+			Body:   body,
+		})
+		mu.Unlock()
+
+		switch {
+		case req.Method == http.MethodPost && strings.Contains(req.URL.Path, "/interactions/"):
+			return jsonHTTPResponse(`{}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/api/v9/guilds/guild-1/channels":
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("failed to decode guild channel payload: %v", err)
+			}
+			name, _ := payload["name"].(string)
+			switch name {
+			case "ow-custommatch-bot":
+				return jsonHTTPResponse(`{"id":"category-1","type":4}`), nil
+			case "チームA":
+				return jsonHTTPResponse(`{"id":"vc-1","type":2}`), nil
+			case "チームB":
+				return jsonHTTPResponse(`{"id":"vc-2","type":2}`), nil
+			default:
+				t.Fatalf("unexpected guild channel name: %q", name)
+				return nil, nil
+			}
+		case req.Method == http.MethodPost && req.URL.Path == "/api/v9/channels/vc-1/invites":
+			return jsonHTTPResponse(`{"code":"invite-1"}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/api/v9/channels/vc-2/invites":
+			return jsonHTTPResponse(`{"code":"invite-2"}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/api/v9/channels/channel-1/messages":
+			return jsonHTTPResponse(`{"id":"result-1"}`), nil
+		case req.Method == http.MethodPatch && req.URL.Path == "/api/v9/channels/channel-1/messages/message-1":
+			return jsonHTTPResponse(`{"id":"message-1"}`), nil
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+			return nil, nil
+		}
+	})
+
+	b := &Bot{
+		rankData: rankData,
+		vcConfig: vcConfig,
+		recruitments: map[string]*model.Recruitment{
+			"channel-1": r,
+		},
+		testDummies: map[string]map[string]model.PlayerInfo{
+			"channel-1": testDummies,
+		},
+	}
+
+	b.handleAssign(session, newAssignInteraction("channel-1", "organizer-1"))
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(requests) != 8 {
+		t.Fatalf("len(requests) = %d, want 8", len(requests))
+	}
+
+	initialPayload := decodeJSONMap(t, requests[0].Body)
+	initialData := initialPayload["data"].(map[string]any)
+	label, disabled := extractAssignButtonState(t, initialData)
+	if label != "🤖 計算中" {
+		t.Fatalf("initial assign button label = %q, want %q", label, "🤖 計算中")
+	}
+	if !disabled {
+		t.Fatalf("initial assign button should be disabled")
+	}
+
+	restorePayload := decodeJSONMap(t, requests[len(requests)-1].Body)
+	label, disabled = extractAssignButtonState(t, restorePayload)
+	if label != "🔁 再振り分け" {
+		t.Fatalf("restored assign button label = %q, want %q", label, "🔁 再振り分け")
+	}
+	if disabled {
+		t.Fatalf("restored assign button should be enabled")
+	}
+	if r.AssignInProgress {
+		t.Fatalf("AssignInProgress should be false after handleAssign returns")
+	}
+	if !r.HasAssigned {
+		t.Fatalf("HasAssigned should be true after successful assign")
+	}
+}
+
 func TestBuildMatchRestartComponents(t *testing.T) {
 	components := buildMatchRestartComponents("restart-token")
 	if len(components) != 1 {
@@ -607,4 +987,97 @@ func findAssignButton(t *testing.T, components []discordgo.MessageComponent) dis
 
 	t.Fatalf("assign button not found")
 	return discordgo.Button{}
+}
+
+type recordedRequest struct {
+	Method string
+	Path   string
+	Body   []byte
+}
+
+type roundTripFunc func(req *http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func newTestDiscordSession(t *testing.T, transport roundTripFunc) *discordgo.Session {
+	t.Helper()
+
+	session, err := discordgo.New("Bot test-token")
+	if err != nil {
+		t.Fatalf("discordgo.New failed: %v", err)
+	}
+	session.Client = &http.Client{Transport: transport}
+	return session
+}
+
+func newAssignInteraction(channelID, userID string) *discordgo.InteractionCreate {
+	return &discordgo.InteractionCreate{
+		Interaction: &discordgo.Interaction{
+			ID:        "interaction-1",
+			AppID:     "app-1",
+			Token:     "token-1",
+			ChannelID: channelID,
+			GuildID:   "guild-1",
+			Type:      discordgo.InteractionMessageComponent,
+			Member: &discordgo.Member{
+				User: &discordgo.User{
+					ID:       userID,
+					Username: "Organizer",
+				},
+			},
+		},
+	}
+}
+
+func jsonHTTPResponse(body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func decodeJSONMap(t *testing.T, body []byte) map[string]any {
+	t.Helper()
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("failed to decode JSON payload: %v", err)
+	}
+	return payload
+}
+
+func extractAssignButtonState(t *testing.T, payload map[string]any) (string, bool) {
+	t.Helper()
+
+	components, ok := payload["components"].([]any)
+	if !ok {
+		t.Fatalf("components not found in payload: %v", payload)
+	}
+	for _, rowValue := range components {
+		row, ok := rowValue.(map[string]any)
+		if !ok {
+			continue
+		}
+		children, ok := row["components"].([]any)
+		if !ok {
+			continue
+		}
+		for _, childValue := range children {
+			child, ok := childValue.(map[string]any)
+			if !ok {
+				continue
+			}
+			if customID, _ := child["custom_id"].(string); customID == "assign" {
+				label, _ := child["label"].(string)
+				disabled, _ := child["disabled"].(bool)
+				return label, disabled
+			}
+		}
+	}
+
+	t.Fatalf("assign button not found in payload: %v", payload)
+	return "", false
 }
