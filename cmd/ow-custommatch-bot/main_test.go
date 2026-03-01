@@ -233,6 +233,17 @@ func TestPromptStartupMode(t *testing.T) {
 		if !got {
 			t.Fatalf("expected test mode to be selected")
 		}
+		output := out.String()
+		for _, want := range []string{"通常運用", "動作確認用", "Enterキーですぐに通常運用", "自動で通常運用を開始します"} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("prompt output missing %q: %q", want, output)
+			}
+		}
+		for _, unwanted := range []string{"本番モード", "テストモード"} {
+			if strings.Contains(output, unwanted) {
+				t.Fatalf("prompt output should not contain %q: %q", unwanted, output)
+			}
+		}
 	})
 
 	t.Run("production mode selected", func(t *testing.T) {
@@ -264,6 +275,72 @@ func TestPromptStartupMode(t *testing.T) {
 			t.Fatalf("expected timeout to select production mode")
 		}
 	})
+}
+
+func TestStartupUIPrintBanner(t *testing.T) {
+	var out bytes.Buffer
+	ui := startupUI{out: &out}
+
+	ui.printBanner("1.2.3")
+
+	got := out.String()
+	for _, want := range []string{"Overwatch Custom Match Assistant", "v1.2.3", guideURL} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("banner output missing %q: %q", want, got)
+		}
+	}
+}
+
+func TestStartupUIPrintPaths(t *testing.T) {
+	var out bytes.Buffer
+	ui := startupUI{out: &out}
+
+	ui.printPaths("/var/lib/owcmb", "/var/log/owcmb.log", "/var/lib/owcmb/app.sqlite")
+
+	got := out.String()
+	for _, want := range []string{"データ保存先", "ログファイル", "データベース"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("paths output missing %q: %q", want, got)
+		}
+	}
+	for _, unwanted := range []string{"\ndata ", "\nlog ", "\ndb "} {
+		if strings.Contains("\n"+got, unwanted) {
+			t.Fatalf("paths output should not contain %q label: %q", unwanted, got)
+		}
+	}
+}
+
+func TestStartupUIReady(t *testing.T) {
+	var out bytes.Buffer
+	ui := startupUI{out: &out}
+
+	ui.ready()
+
+	got := out.String()
+	for _, want := range []string{"準備完了", "Discordへの接続を開始します", "Ctrl+C"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("ready output missing %q: %q", want, got)
+		}
+	}
+}
+
+func TestStartupModeConfirmationMessage(t *testing.T) {
+	tests := []struct {
+		name string
+		mode bool
+		want string
+	}{
+		{name: "prod", mode: false, want: "PROD 通常運用で起動します。"},
+		{name: "test", mode: true, want: "TEST 動作確認用で起動します。"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := startupModeConfirmationMessage(tt.mode); got != tt.want {
+				t.Fatalf("startupModeConfirmationMessage(%v) = %q, want %q", tt.mode, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestDescribeTokenError(t *testing.T) {
