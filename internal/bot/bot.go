@@ -547,40 +547,6 @@ func (b *Bot) handleAssign(s *discordgo.Session, i *discordgo.InteractionCreate)
 		return
 	}
 
-	fields := make([]*discordgo.MessageEmbedField, 0, len(teams))
-	testModeResult := false
-	for idx, team := range teams {
-		members := make([]string, 0, len(team))
-		for _, p := range team {
-			if strings.HasPrefix(p.ID, "dummy-") {
-				testModeResult = true
-				if p.Name != "" {
-					members = append(members, p.Name)
-					continue
-				}
-			}
-			members = append(members, "<@"+p.ID+">")
-		}
-		value := strings.Join(members, "\n")
-		if value == "" {
-			value = "（なし）"
-		}
-		avgScore := teamAverageScore(team)
-		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   fmt.Sprintf("チーム%s（平均スコア: %.0f）", teamLabel(idx), avgScore),
-			Value:  value,
-			Inline: true,
-		})
-	}
-	embed := &discordgo.MessageEmbed{
-		Title:  "🎲 チーム振り分け結果",
-		Color:  0x3498DB,
-		Fields: fields,
-	}
-	if testModeResult {
-		embed.Footer = &discordgo.MessageEmbedFooter{Text: "テストモード"}
-	}
-
 	vcChannelIDs, err := b.ensureVCChannels(s, r.GuildID, len(teams))
 	if err != nil {
 		log.Printf("failed to ensure vc channels: %v", err)
@@ -616,6 +582,7 @@ func (b *Bot) handleAssign(s *discordgo.Session, i *discordgo.InteractionCreate)
 	wg.Wait()
 	close(results)
 
+	vcInviteURLs := make([]string, len(teams))
 	for res := range results {
 		if res.err != nil {
 			log.Printf("failed to create vc invite for team %s: %v", teamLabel(res.idx), res.err)
@@ -624,32 +591,10 @@ func (b *Bot) handleAssign(s *discordgo.Session, i *discordgo.InteractionCreate)
 			}
 			return
 		}
-		fields[res.idx].Value += "\n[📢 VCに参加](" + res.url + ")"
+		vcInviteURLs[res.idx] = res.url
 	}
 
-	if len(remainder) > 0 {
-		members := make([]string, 0, len(remainder))
-		for _, p := range remainder {
-			if strings.HasPrefix(p.ID, "dummy-") {
-				testModeResult = true
-				if p.Name != "" {
-					members = append(members, p.Name)
-					continue
-				}
-			}
-			members = append(members, "<@"+p.ID+">")
-		}
-		value := strings.Join(members, "\n")
-		if value == "" {
-			value = "（なし）"
-		}
-		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   fmt.Sprintf("余りメンバー（%d人）", len(remainder)),
-			Value:  value,
-			Inline: false,
-		})
-	}
-	embed.Fields = fields
+	embed := buildAssignEmbed(teams, vcInviteURLs, remainder, hasDummyScoredPlayers(teams, remainder))
 
 	if _, err := s.ChannelMessageSendEmbed(i.ChannelID, embed); err != nil {
 		log.Printf("failed to post team assignments: %v", err)
@@ -936,6 +881,81 @@ func teamAverageScore(team []model.ScoredPlayer) float64 {
 		total += p.Score
 	}
 	return total / float64(len(team))
+}
+
+func buildAssignEmbed(teams [][]model.ScoredPlayer, vcInviteURLs []string, remainder []model.ScoredPlayer, testMode bool) *discordgo.MessageEmbed {
+	fields := make([]*discordgo.MessageEmbedField, 0, len(teams)+1)
+	for idx, team := range teams {
+		vcInviteURL := ""
+		if idx < len(vcInviteURLs) {
+			vcInviteURL = vcInviteURLs[idx]
+		}
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   "チーム" + teamLabel(idx),
+			Value:  buildAssignTeamFieldValue(team, vcInviteURL),
+			Inline: true,
+		})
+	}
+	if len(remainder) > 0 {
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   fmt.Sprintf("余りメンバー（%d人）", len(remainder)),
+			Value:  buildAssignMemberList(remainder),
+			Inline: false,
+		})
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:  "🎲 チーム振り分け結果",
+		Color:  0x3498DB,
+		Fields: fields,
+	}
+	if testMode {
+		embed.Footer = &discordgo.MessageEmbedFooter{Text: "テストモード"}
+	}
+	return embed
+}
+
+func buildAssignTeamFieldValue(team []model.ScoredPlayer, vcInviteURL string) string {
+	lines := []string{fmt.Sprintf("平均スコア: %.0f", teamAverageScore(team)), buildAssignMemberList(team)}
+	if vcInviteURL != "" {
+		lines = append(lines, "[📢 VCに参加]("+vcInviteURL+")")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func buildAssignMemberList(players []model.ScoredPlayer) string {
+	if len(players) == 0 {
+		return "（なし）"
+	}
+
+	members := make([]string, 0, len(players))
+	for _, p := range players {
+		if strings.HasPrefix(p.ID, "dummy-") && p.Name != "" {
+			members = append(members, p.Name)
+			continue
+		}
+		members = append(members, "<@"+p.ID+">")
+	}
+	if len(members) == 0 {
+		return "（なし）"
+	}
+	return strings.Join(members, "\n")
+}
+
+func hasDummyScoredPlayers(teams [][]model.ScoredPlayer, remainder []model.ScoredPlayer) bool {
+	for _, team := range teams {
+		for _, player := range team {
+			if strings.HasPrefix(player.ID, "dummy-") {
+				return true
+			}
+		}
+	}
+	for _, player := range remainder {
+		if strings.HasPrefix(player.ID, "dummy-") {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Bot) startRankRegistrationFlow(s *discordgo.Session, i *discordgo.InteractionCreate, promptType rankRegistrationPromptType, autoEntry bool) error {
