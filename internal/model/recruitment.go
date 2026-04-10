@@ -19,6 +19,7 @@ type ScoredPlayer struct {
 
 type Recruitment struct {
 	Entries          []Entry
+	Parties          map[string][]string // hostUserID -> member userIDs (hostを除く)
 	RankData         RankDataFile
 	OrganizerID      string // 発案者の Discord UserID
 	MessageID        string // Discord メッセージID（Embed 更新用）
@@ -30,7 +31,7 @@ type Recruitment struct {
 }
 
 func NewRecruitment(rankData RankDataFile) *Recruitment {
-	return &Recruitment{Entries: []Entry{}, RankData: rankData}
+	return &Recruitment{Entries: []Entry{}, Parties: make(map[string][]string), RankData: rankData}
 }
 
 func (r *Recruitment) AddEntry(userID, name string) bool {
@@ -48,10 +49,87 @@ func (r *Recruitment) RemoveEntry(userID string) bool {
 	for i, e := range r.Entries {
 		if e.UserID == userID {
 			r.Entries = append(r.Entries[:i], r.Entries[i+1:]...)
+			return r.removeEntryWithPartyCascade(userID)
+		}
+	}
+	return false
+}
+
+func (r *Recruitment) removeEntryWithPartyCascade(userID string) bool {
+	hostID, members, found := r.findPartyByMember(userID)
+	if !found {
+		return true
+	}
+
+	targetIDs := append([]string{hostID}, members...)
+	for _, id := range targetIDs {
+		if id == userID {
+			continue
+		}
+		for i := 0; i < len(r.Entries); i++ {
+			if r.Entries[i].UserID == id {
+				r.Entries = append(r.Entries[:i], r.Entries[i+1:]...)
+				i--
+			}
+		}
+	}
+	delete(r.Parties, hostID)
+	return true
+}
+
+func (r *Recruitment) SetParty(hostID string, members []string) {
+	if r.Parties == nil {
+		r.Parties = make(map[string][]string)
+	}
+	cleaned := make([]string, 0, len(members))
+	seen := map[string]struct{}{}
+	for _, id := range members {
+		if id == "" || id == hostID {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		cleaned = append(cleaned, id)
+	}
+	if len(cleaned) == 0 {
+		delete(r.Parties, hostID)
+		return
+	}
+	r.Parties[hostID] = cleaned
+}
+
+func (r *Recruitment) ClearParty(hostID string) {
+	delete(r.Parties, hostID)
+}
+
+func (r *Recruitment) IsEntered(userID string) bool {
+	for _, e := range r.Entries {
+		if e.UserID == userID {
 			return true
 		}
 	}
 	return false
+}
+
+func (r *Recruitment) findPartyByMember(userID string) (string, []string, bool) {
+	for hostID, members := range r.Parties {
+		if hostID == userID {
+			return hostID, append([]string{}, members...), true
+		}
+		for _, member := range members {
+			if member == userID {
+				return hostID, append([]string{}, members...), true
+			}
+		}
+	}
+	return "", nil, false
+}
+
+func (r *Recruitment) FindPartyHostOf(userID string) (string, bool) {
+	hostID, _, found := r.findPartyByMember(userID)
+	return hostID, found
 }
 
 func (r *Recruitment) CalculatePlayerScore(highestRank Rank) float64 {
@@ -78,70 +156,253 @@ func (r *Recruitment) MakeTeamsWithRemainder(players []ScoredPlayer) ([][]Scored
 	if len(players) < 10 {
 		return nil, nil
 	}
-	target := len(players) / 5 * 5
+	groups := r.buildPartyGroups(players)
+	selected, remainder := selectGroupedPlayers(groups)
+	if len(selected) < 10 {
+		return nil, nil
+	}
 
-	shuffled := append([]ScoredPlayer(nil), players...)
-	rand.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
-	remainder := append([]ScoredPlayer(nil), shuffled[target:]...)
-	shuffled = shuffled[:target]
-
-	sort.Slice(shuffled, func(i, j int) bool { return shuffled[i].Score > shuffled[j].Score })
-	return r.balancedScoreTeams(shuffled), remainder
+	sort.Slice(selected, func(i, j int) bool { return selected[i].Score > selected[j].Score })
+	teams := r.balancedScoreTeams(selected)
+	if teams == nil {
+		return nil, nil
+	}
+	return teams, remainder
 }
 
 func (r *Recruitment) balancedScoreTeams(players []ScoredPlayer) [][]ScoredPlayer {
+	grouped := r.buildPartyGroups(players)
+	if len(grouped) == 0 {
+		return nil
+	}
 	teamCount := len(players) / 5
+	if !canPackPartyGroups(grouped, teamCount) {
+		return nil
+	}
+
 	var best [][]ScoredPlayer
 	bestVariance := math.MaxFloat64
-
-	for range 20 {
-		p := append([]ScoredPlayer(nil), players...)
-		highEnd := len(p) / 3
-		midEnd := highEnd * 2
-		high := append([]ScoredPlayer(nil), p[:highEnd]...)
-		mid := append([]ScoredPlayer(nil), p[highEnd:midEnd]...)
-		low := append([]ScoredPlayer(nil), p[midEnd:]...)
-
-		rand.Shuffle(len(high), func(i, j int) { high[i], high[j] = high[j], high[i] })
-		rand.Shuffle(len(mid), func(i, j int) { mid[i], mid[j] = mid[j], mid[i] })
-		rand.Shuffle(len(low), func(i, j int) { low[i], low[j] = low[j], low[i] })
-
-		teams := make([][]ScoredPlayer, teamCount)
-		for i := 0; i < teamCount; i++ {
-			highCount := min(rand.Intn(2)+1, len(high))
-			for range highCount {
-				teams[i] = append(teams[i], high[len(high)-1])
-				high = high[:len(high)-1]
-			}
-			midCount := min(2, len(mid))
-			for range midCount {
-				teams[i] = append(teams[i], mid[len(mid)-1])
-				mid = mid[:len(mid)-1]
-			}
-			for len(teams[i]) < 5 && len(low) > 0 {
-				teams[i] = append(teams[i], low[len(low)-1])
-				low = low[:len(low)-1]
-			}
+	for range 200 {
+		teams, ok := buildPackedTeamsTrial(grouped, teamCount)
+		if !ok {
+			continue
 		}
-
-		remaining := append(append(high, mid...), low...)
-		for _, pl := range remaining {
-			for i := range teams {
-				if len(teams[i]) < 5 {
-					teams[i] = append(teams[i], pl)
-					break
-				}
-			}
-		}
-
 		variance := teamScoreVariance(teams)
 		if variance < bestVariance {
 			bestVariance = variance
 			best = teams
 		}
 	}
-
 	return best
+}
+
+type playerGroup struct {
+	Players []ScoredPlayer
+}
+
+func (r *Recruitment) buildPartyGroups(players []ScoredPlayer) []playerGroup {
+	playerByID := make(map[string]ScoredPlayer, len(players))
+	for _, p := range players {
+		playerByID[p.ID] = p
+	}
+	used := make(map[string]bool, len(players))
+	groups := make([]playerGroup, 0, len(players))
+	for hostID, members := range r.Parties {
+		if used[hostID] {
+			continue
+		}
+		host, ok := playerByID[hostID]
+		if !ok {
+			continue
+		}
+		groupPlayers := []ScoredPlayer{host}
+		used[hostID] = true
+		valid := true
+		for _, memberID := range members {
+			member, ok := playerByID[memberID]
+			if !ok {
+				valid = false
+				break
+			}
+			groupPlayers = append(groupPlayers, member)
+		}
+		if !valid || len(groupPlayers) > 5 {
+			continue
+		}
+		for _, p := range groupPlayers[1:] {
+			used[p.ID] = true
+		}
+		groups = append(groups, playerGroup{Players: groupPlayers})
+	}
+
+	for _, p := range players {
+		if used[p.ID] {
+			continue
+		}
+		groups = append(groups, playerGroup{Players: []ScoredPlayer{p}})
+	}
+	return groups
+}
+
+func selectGroupedPlayers(groups []playerGroup) ([]ScoredPlayer, []ScoredPlayer) {
+	if len(groups) == 0 {
+		return nil, nil
+	}
+	bestSelection := make([]bool, len(groups))
+	bestTotal := -1
+	groupCount := len(groups)
+	if groupCount <= 20 {
+		limit := 1 << groupCount
+		for mask := 0; mask < limit; mask++ {
+			selection := make([]bool, len(groups))
+			total := 0
+			for idx := range groups {
+				if mask&(1<<idx) == 0 {
+					continue
+				}
+				selection[idx] = true
+				total += len(groups[idx].Players)
+			}
+			if total < 10 || total%5 != 0 {
+				continue
+			}
+			if total > bestTotal {
+				bestTotal = total
+				bestSelection = selection
+			}
+		}
+	} else {
+		for range 6000 {
+			selection := make([]bool, len(groups))
+			total := 0
+			for idx := range groups {
+				if rand.Intn(2) == 0 {
+					continue
+				}
+				selection[idx] = true
+				total += len(groups[idx].Players)
+			}
+			if total < 10 || total%5 != 0 {
+				continue
+			}
+			if total > bestTotal {
+				bestTotal = total
+				bestSelection = selection
+			}
+		}
+	}
+
+	if bestTotal < 10 {
+		return nil, nil
+	}
+
+	selected := make([]ScoredPlayer, 0, bestTotal)
+	remainder := make([]ScoredPlayer, 0)
+	for idx, group := range groups {
+		if !bestSelection[idx] {
+			remainder = append(remainder, group.Players...)
+			continue
+		}
+		selected = append(selected, group.Players...)
+	}
+	return selected, remainder
+}
+
+func canPackPartyGroups(groups []playerGroup, teamCount int) bool {
+	sizes := make([]int, len(groups))
+	for i, g := range groups {
+		sizes[i] = len(g.Players)
+	}
+	sort.Slice(sizes, func(i, j int) bool { return sizes[i] > sizes[j] })
+	caps := make([]int, teamCount)
+	for i := range caps {
+		caps[i] = 5
+	}
+	var dfs func(idx int) bool
+	dfs = func(idx int) bool {
+		if idx == len(sizes) {
+			for _, cap := range caps {
+				if cap != 0 {
+					return false
+				}
+			}
+			return true
+		}
+		seen := map[int]struct{}{}
+		for i := range caps {
+			if caps[i] < sizes[idx] {
+				continue
+			}
+			if _, ok := seen[caps[i]]; ok {
+				continue
+			}
+			seen[caps[i]] = struct{}{}
+			caps[i] -= sizes[idx]
+			if dfs(idx + 1) {
+				return true
+			}
+			caps[i] += sizes[idx]
+		}
+		return false
+	}
+	return dfs(0)
+}
+
+func buildPackedTeamsTrial(groups []playerGroup, teamCount int) ([][]ScoredPlayer, bool) {
+	teams := make([][]ScoredPlayer, teamCount)
+	teamSizes := make([]int, teamCount)
+	teamScores := make([]float64, teamCount)
+	shuffled := append([]playerGroup(nil), groups...)
+	rand.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+	sort.Slice(shuffled, func(i, j int) bool { return len(shuffled[i].Players) > len(shuffled[j].Players) })
+	for _, group := range shuffled {
+		size := len(group.Players)
+		candidates := make([]int, 0, teamCount)
+		for idx := range teams {
+			if teamSizes[idx]+size <= 5 {
+				candidates = append(candidates, idx)
+			}
+		}
+		if len(candidates) == 0 {
+			return nil, false
+		}
+		bestTeam := candidates[0]
+		bestGap := math.MaxFloat64
+		groupAvg := teamAverage(group.Players)
+		for _, idx := range candidates {
+			avg := teamScores[idx]
+			if teamSizes[idx] > 0 {
+				avg /= float64(teamSizes[idx])
+			}
+			gap := math.Abs(avg - groupAvg)
+			if gap < bestGap {
+				bestGap = gap
+				bestTeam = idx
+			}
+		}
+		teams[bestTeam] = append(teams[bestTeam], group.Players...)
+		teamSizes[bestTeam] += size
+		for _, p := range group.Players {
+			teamScores[bestTeam] += p.Score
+		}
+	}
+	for _, s := range teamSizes {
+		if s != 5 {
+			return nil, false
+		}
+	}
+	return teams, true
+}
+
+func teamAverage(players []ScoredPlayer) float64 {
+	if len(players) == 0 {
+		return 0
+	}
+	total := 0.0
+	for _, p := range players {
+		total += p.Score
+	}
+	return total / float64(len(players))
 }
 
 func teamScoreVariance(teams [][]ScoredPlayer) float64 {

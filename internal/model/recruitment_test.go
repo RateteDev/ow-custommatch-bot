@@ -141,3 +141,48 @@ func TestRemoveEntry_notExisting(t *testing.T) {
 		t.Errorf("len(Entries) = %d, want 1", len(r.Entries))
 	}
 }
+
+func TestPartyCascadeOnRemoveEntry(t *testing.T) {
+	r := NewRecruitment(testRankData())
+	r.AddEntry("host", "Host")
+	r.AddEntry("m1", "M1")
+	r.AddEntry("solo", "Solo")
+	r.SetParty("host", []string{"m1"})
+
+	if !r.RemoveEntry("m1") {
+		t.Fatalf("RemoveEntry should succeed")
+	}
+	if r.IsEntered("host") {
+		t.Fatalf("host should also be removed by party cascade")
+	}
+	if !r.IsEntered("solo") {
+		t.Fatalf("unrelated solo entry should remain")
+	}
+	if _, ok := r.FindPartyHostOf("host"); ok {
+		t.Fatalf("party should be cleared after cascade")
+	}
+}
+
+func TestMakeTeamsWithPartyConstraint(t *testing.T) {
+	r := NewRecruitment(testRankData())
+	players := []ScoredPlayer{
+		{ID: "a", Score: 2000}, {ID: "b", Score: 1900}, {ID: "c", Score: 1800}, {ID: "d", Score: 1700}, {ID: "e", Score: 1600},
+		{ID: "f", Score: 1500}, {ID: "g", Score: 1400}, {ID: "h", Score: 1300}, {ID: "i", Score: 1200}, {ID: "j", Score: 1100},
+	}
+	r.SetParty("a", []string{"b", "c"})
+
+	teams, _ := r.MakeTeamsWithRemainder(players)
+	if len(teams) == 0 {
+		t.Fatalf("expected team assignment")
+	}
+
+	teamIdx := map[string]int{}
+	for i, team := range teams {
+		for _, p := range team {
+			teamIdx[p.ID] = i
+		}
+	}
+	if teamIdx["a"] != teamIdx["b"] || teamIdx["a"] != teamIdx["c"] {
+		t.Fatalf("party members should stay in the same team")
+	}
+}
