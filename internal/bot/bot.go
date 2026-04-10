@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -26,6 +27,7 @@ type Bot struct {
 	pendingRestartsMu    sync.RWMutex
 	pendingMatchRestarts map[string]pendingMatchRestart
 	pendingRegistrations map[string]pendingRegEntry
+	pendingPartyMembers  map[string][]string
 	testDummies          map[string]map[string]model.PlayerInfo
 	now                  func() time.Time
 	readyOnce            sync.Once
@@ -89,6 +91,7 @@ func New(dbPath string) (*Bot, error) {
 		recruitments:         make(map[string]*model.Recruitment),
 		pendingMatchRestarts: make(map[string]pendingMatchRestart),
 		pendingRegistrations: make(map[string]pendingRegEntry),
+		pendingPartyMembers:  make(map[string][]string),
 		testDummies:          make(map[string]map[string]model.PlayerInfo),
 		now:                  time.Now,
 	}, nil
@@ -194,6 +197,16 @@ func (b *Bot) onInteractionCreate(s *discordgo.Session, i *discordgo.Interaction
 			b.handleAssign(s, i)
 		case customID == "cancel":
 			b.handleCancel(s, i)
+		case customID == "party_open":
+			b.handlePartyOpen(s, i)
+		case customID == "party_members_select":
+			b.handlePartyMemberSelect(s, i)
+		case customID == "party_save":
+			b.handlePartySave(s, i)
+		case customID == "party_clear":
+			b.handlePartyClear(s, i)
+		case customID == "party_close":
+			b.handlePartyClose(s, i)
 		case strings.HasPrefix(customID, "match_restart_confirm:"):
 			b.handleMatchRestartConfirm(s, i)
 		case strings.HasPrefix(customID, "match_restart_cancel:"):
@@ -606,6 +619,7 @@ func (b *Bot) handleCancelEntry(s *discordgo.Session, i *discordgo.InteractionCr
 	}
 
 	userID, _ := interactionUser(i)
+	hostID, hasParty := r.FindPartyHostOf(userID)
 	if !r.RemoveEntry(userID) {
 		if err := b.respondEphemeralText(s, i, "エントリーしていません"); err != nil {
 			log.Printf("failed to respond missing entry on cancel: %v", err)
@@ -624,6 +638,104 @@ func (b *Bot) handleCancelEntry(s *discordgo.Session, i *discordgo.InteractionCr
 	if err := b.ackInteraction(s, i); err != nil {
 		log.Printf("failed to respond cancel entry success: %v", err)
 	}
+	if hasParty {
+		_, _ = s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+			Content: "⚠️ Partyメンバーが取り消したため、Party全員のエントリーを外してPartyを解除しました。",
+			Flags:   discordgo.MessageFlagsEphemeral,
+		})
+		delete(b.pendingPartyMembers, hostID)
+	}
+}
+
+func (b *Bot) handlePartyOpen(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	r, ok := b.getRecruitment(i.ChannelID)
+	if !ok || !r.IsOpen {
+		_ = b.respondEphemeralText(s, i, "募集終了後はParty設定できません")
+		return
+	}
+	userID, _ := interactionUser(i)
+	if !r.IsEntered(userID) {
+		_ = b.respondEphemeralText(s, i, "先にエントリーしてください")
+		return
+	}
+	selected := b.currentPartyMemberSelection(r, userID)
+	b.pendingPartyMembers[i.ChannelID+":"+userID] = selected
+	_ = b.respondPartyMessage(s, i, r, userID, "", false)
+}
+
+func (b *Bot) handlePartyMemberSelect(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	r, ok := b.getRecruitment(i.ChannelID)
+	if !ok || !r.IsOpen {
+		_ = b.updateComponentWithText(s, i, "募集終了後はParty設定できません")
+		return
+	}
+	userID, _ := interactionUser(i)
+	if !r.IsEntered(userID) {
+		_ = b.updateComponentWithText(s, i, "先にエントリーしてください")
+		return
+	}
+	selected := append([]string(nil), i.MessageComponentData().Values...)
+	b.pendingPartyMembers[i.ChannelID+":"+userID] = selected
+	_ = b.respondPartyMessage(s, i, r, userID, "", true)
+}
+
+func (b *Bot) handlePartySave(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	r, ok := b.getRecruitment(i.ChannelID)
+	if !ok || !r.IsOpen {
+		_ = b.updateComponentWithText(s, i, "募集終了後はParty設定できません")
+		return
+	}
+	userID, _ := interactionUser(i)
+	if !r.IsEntered(userID) {
+		_ = b.updateComponentWithText(s, i, "先にエントリーしてください")
+		return
+	}
+
+	selected := b.currentPartyMemberSelection(r, userID)
+	if pending, ok := b.pendingPartyMembers[i.ChannelID+":"+userID]; ok {
+		selected = append([]string(nil), pending...)
+	}
+	if len(selected)+1 > 5 {
+		_ = b.respondPartyMessage(s, i, r, userID, "❌ Partyは最大5人までです", true)
+		return
+	}
+
+	validCandidates := b.partyCandidateSet(r, userID)
+	for _, id := range selected {
+		if strings.HasPrefix(id, "dummy-") {
+			_ = b.respondPartyMessage(s, i, r, userID, "❌ ダミープレイヤーはPartyに入れられません", true)
+			return
+		}
+		if _, ok := validCandidates[id]; !ok {
+			_ = b.respondPartyMessage(s, i, r, userID, "❌ 選択相手がすでに別Partyに所属しているか、参加者ではありません", true)
+			return
+		}
+	}
+	r.SetParty(userID, selected)
+	delete(b.pendingPartyMembers, i.ChannelID+":"+userID)
+	if err := b.updateRecruitEmbed(s, r, false); err != nil {
+		log.Printf("failed to update recruit embed after party save: %v", err)
+	}
+	_ = b.respondPartyMessage(s, i, r, userID, "✅ Partyを保存しました", true)
+}
+
+func (b *Bot) handlePartyClear(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	r, ok := b.getRecruitment(i.ChannelID)
+	if !ok || !r.IsOpen {
+		_ = b.updateComponentWithText(s, i, "募集終了後はParty設定できません")
+		return
+	}
+	userID, _ := interactionUser(i)
+	r.ClearParty(userID)
+	delete(b.pendingPartyMembers, i.ChannelID+":"+userID)
+	if err := b.updateRecruitEmbed(s, r, false); err != nil {
+		log.Printf("failed to update recruit embed after party clear: %v", err)
+	}
+	_ = b.respondPartyMessage(s, i, r, userID, "✅ Partyを解除しました", true)
+}
+
+func (b *Bot) handlePartyClose(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	_ = b.updateComponentWithText(s, i, "Party設定を閉じました。")
 }
 
 func (b *Bot) handleAssign(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -971,13 +1083,64 @@ func recruitParticipantList(r *model.Recruitment) string {
 		return "（なし）"
 	}
 
-	users := make([]string, 0, len(r.Entries))
+	type partyInfo struct {
+		label   string
+		isHost  bool
+		partyNo int
+	}
+	partyByUser := map[string]partyInfo{}
+	partyHosts := make([]string, 0, len(r.Parties))
+	for hostID := range r.Parties {
+		partyHosts = append(partyHosts, hostID)
+	}
+	sort.Strings(partyHosts)
+	for idx, hostID := range partyHosts {
+		partyNo := idx + 1
+		partyByUser[hostID] = partyInfo{label: fmt.Sprintf("Party%d", partyNo), isHost: true, partyNo: partyNo}
+		for _, memberID := range r.Parties[hostID] {
+			partyByUser[memberID] = partyInfo{label: fmt.Sprintf("Party%d", partyNo), isHost: false, partyNo: partyNo}
+		}
+	}
+
+	ordered := make([]model.Entry, 0, len(r.Entries))
+	for _, hostID := range partyHosts {
+		for _, e := range r.Entries {
+			if e.UserID == hostID {
+				ordered = append(ordered, e)
+				break
+			}
+		}
+		for _, memberID := range r.Parties[hostID] {
+			for _, e := range r.Entries {
+				if e.UserID == memberID {
+					ordered = append(ordered, e)
+					break
+				}
+			}
+		}
+	}
 	for _, e := range r.Entries {
-		if strings.HasPrefix(e.UserID, "dummy-") {
-			users = append(users, e.Name)
+		if _, ok := partyByUser[e.UserID]; ok {
 			continue
 		}
-		users = append(users, "<@"+e.UserID+">")
+		ordered = append(ordered, e)
+	}
+
+	users := make([]string, 0, len(ordered))
+	for _, e := range ordered {
+		name := "<@" + e.UserID + ">"
+		if strings.HasPrefix(e.UserID, "dummy-") {
+			name = e.Name
+		}
+		if info, ok := partyByUser[e.UserID]; ok {
+			role := "メンバー"
+			if info.isHost {
+				role = "ホスト"
+			}
+			users = append(users, fmt.Sprintf("%s - %s %s", name, info.label, role))
+			continue
+		}
+		users = append(users, name)
 	}
 	return strings.Join(users, "\n")
 }
@@ -1006,6 +1169,12 @@ func (b *Bot) buildRecruitComponents(r *model.Recruitment, disabled bool) []disc
 					Style:    discordgo.SecondaryButton,
 					Disabled: disabled,
 				},
+				discordgo.Button{
+					Label:    "👥 Party設定",
+					CustomID: "party_open",
+					Style:    discordgo.SecondaryButton,
+					Disabled: disabled,
+				},
 			},
 		},
 		discordgo.ActionsRow{
@@ -1025,6 +1194,131 @@ func (b *Bot) buildRecruitComponents(r *model.Recruitment, disabled bool) []disc
 			},
 		},
 	}
+}
+
+func (b *Bot) partyCandidateSet(r *model.Recruitment, hostID string) map[string]struct{} {
+	candidates := map[string]struct{}{}
+	if r == nil {
+		return candidates
+	}
+	for _, e := range r.Entries {
+		if e.UserID == hostID || strings.HasPrefix(e.UserID, "dummy-") {
+			continue
+		}
+		partyHost, inParty := r.FindPartyHostOf(e.UserID)
+		if inParty && partyHost != hostID {
+			continue
+		}
+		candidates[e.UserID] = struct{}{}
+	}
+	return candidates
+}
+
+func (b *Bot) currentPartyMemberSelection(r *model.Recruitment, hostID string) []string {
+	if r == nil || r.Parties == nil {
+		return []string{}
+	}
+	members := r.Parties[hostID]
+	return append([]string(nil), members...)
+}
+
+func (b *Bot) partyStateText(r *model.Recruitment, hostID string) string {
+	members := r.Parties[hostID]
+	if len(members) == 0 {
+		return "現在のParty設定: なし"
+	}
+	lines := []string{
+		"現在のParty設定:",
+		fmt.Sprintf("- ホスト: <@%s>", hostID),
+	}
+	for _, id := range members {
+		lines = append(lines, "- メンバー: <@"+id+">")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (b *Bot) buildPartyComponents(r *model.Recruitment, hostID string) []discordgo.MessageComponent {
+	candidates := b.partyCandidateSet(r, hostID)
+	options := make([]discordgo.SelectMenuOption, 0, len(candidates))
+	entryName := map[string]string{}
+	for _, e := range r.Entries {
+		entryName[e.UserID] = e.Name
+	}
+	ids := make([]string, 0, len(candidates))
+	for id := range candidates {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	selected := map[string]struct{}{}
+	for _, id := range b.currentPartyMemberSelection(r, hostID) {
+		selected[id] = struct{}{}
+	}
+	for _, id := range ids {
+		label := "<@" + id + ">"
+		if n := entryName[id]; n != "" {
+			label = n
+		}
+		_, isDefault := selected[id]
+		options = append(options, discordgo.SelectMenuOption{
+			Label:   label,
+			Value:   id,
+			Default: isDefault,
+		})
+	}
+	disabled := len(candidates) == 0
+
+	return []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.SelectMenu{
+					CustomID:    "party_members_select",
+					Placeholder: "Partyメンバーを選択（最大4人）",
+					MinValues:   func() *int { v := 0; return &v }(),
+					MaxValues:   4,
+					Options:     options,
+					Disabled:    disabled,
+				},
+			},
+		},
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.Button{Label: "保存", CustomID: "party_save", Style: discordgo.SuccessButton},
+				discordgo.Button{Label: "解除", CustomID: "party_clear", Style: discordgo.DangerButton},
+				discordgo.Button{Label: "閉じる", CustomID: "party_close", Style: discordgo.SecondaryButton},
+			},
+		},
+	}
+}
+
+func (b *Bot) respondPartyMessage(s *discordgo.Session, i *discordgo.InteractionCreate, r *model.Recruitment, hostID, status string, update bool) error {
+	description := strings.Join([]string{
+		"この募集にだけ有効なParty設定です。",
+		"あなたがホストです。",
+		"Partyメンバーの誰かが抜けた場合、Party全員のエントリーを外します。",
+		"",
+		b.partyStateText(r, hostID),
+	}, "\n")
+	if status != "" {
+		description = status + "\n\n" + description
+	}
+	respType := discordgo.InteractionResponseChannelMessageWithSource
+	if update {
+		respType = discordgo.InteractionResponseUpdateMessage
+	}
+	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: respType,
+		Data: &discordgo.InteractionResponseData{
+			Flags: discordgo.MessageFlagsEphemeral,
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Title:       "👥 Party設定",
+					Description: description,
+					Color:       0x5865F2,
+				},
+			},
+			Components: b.buildPartyComponents(r, hostID),
+		},
+	})
 }
 
 func buildMatchRestartPrompt() string {

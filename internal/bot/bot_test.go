@@ -208,6 +208,53 @@ func TestBuildRecruitComponentsAssignButtonLabels(t *testing.T) {
 	})
 }
 
+func TestBuildRecruitComponentsContainsPartyButton(t *testing.T) {
+	b := &Bot{}
+	components := b.buildRecruitComponents(&model.Recruitment{}, false)
+	found := false
+	for _, c := range components {
+		row, ok := c.(discordgo.ActionsRow)
+		if !ok {
+			continue
+		}
+		for _, rc := range row.Components {
+			btn, ok := rc.(discordgo.Button)
+			if !ok {
+				continue
+			}
+			if btn.CustomID == "party_open" && btn.Label == "👥 Party設定" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("party button should exist in recruit components")
+	}
+}
+
+func TestRecruitParticipantListIncludesPartyLabels(t *testing.T) {
+	r := &model.Recruitment{
+		Entries: []model.Entry{
+			{UserID: "host", Name: "host"},
+			{UserID: "member", Name: "member"},
+			{UserID: "solo", Name: "solo"},
+		},
+		Parties: map[string][]string{
+			"host": {"member"},
+		},
+	}
+	got := recruitParticipantList(r)
+	if !strings.Contains(got, "<@host> - Party1 ホスト") {
+		t.Fatalf("party host label missing: %s", got)
+	}
+	if !strings.Contains(got, "<@member> - Party1 メンバー") {
+		t.Fatalf("party member label missing: %s", got)
+	}
+	if !strings.Contains(got, "<@solo>") {
+		t.Fatalf("solo entry should remain normal: %s", got)
+	}
+}
+
 func TestTryStartAssignGuardsDuplicateExecution(t *testing.T) {
 	rankData, err := model.LoadEmbeddedRankData()
 	if err != nil {
